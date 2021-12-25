@@ -3,10 +3,9 @@ Plotting tools for Sampling-based algorithms
 @author: huiming zhou
 """
 
+import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import os
-import sys
+matplotlib.use('TkAgg')
 
 
 class Plotting:

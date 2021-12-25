@@ -3,13 +3,11 @@ RRT_star 2D
 @author: huiming zhou
 """
 
-import os
-import sys
 import math
 import numpy as np
 import collections
-from shapely.geometry import Polygon, LineString
-from plot_path import Plotting
+from shapely.geometry import LineString
+from pdm4ar.exercises.final21.plot_path import Plotting
 
 
 class QueueFIFO:

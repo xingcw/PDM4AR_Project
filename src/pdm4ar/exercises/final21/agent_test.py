@@ -4,7 +4,7 @@ from dg_commons.sim.simulator_visualisation import ZOrders
 from matplotlib import pyplot as plt
 
 from pdm4ar.exercises_def.final21.scenario import get_dgscenario
-from RRT_star import RrtStar
+from pdm4ar.exercises.final21.RRT_star import RrtStar
 
 if __name__ == '__main__':
     matplotlib.use('TkAgg')
