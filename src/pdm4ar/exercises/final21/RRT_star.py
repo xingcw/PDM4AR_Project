@@ -6,7 +6,10 @@ RRT_star 2D
 import math
 import numpy as np
 import collections
-from shapely.geometry import LineString
+from typing import Sequence
+import matplotlib.pyplot as plt
+from dg_commons.sim.models.obstacles import StaticObstacle
+from shapely.geometry import LineString, Polygon
 from pdm4ar.exercises.final21.plot_path import Plotting
 
 
@@ -37,7 +40,8 @@ class Node:
 
 
 class RrtStar:
-    def __init__(self, x_start, x_goal, step_len, goal_sample_rate, search_radius, iter_max, dg_scenario):
+    def __init__(self, x_start, x_goal, step_len, goal_sample_rate, search_radius, iter_max,
+                 static_obstacles: Sequence[StaticObstacle]):
         self.s_start = Node(x_start)
         self.s_goal = Node(x_goal)
         self.step_len = step_len
@@ -47,14 +51,18 @@ class RrtStar:
         self.vertex = [self.s_start]
         self.plotting = Plotting(x_start, x_goal)
         self.path = []
-        self.env = dg_scenario
+        self.static_obstacles = static_obstacles
+        self.safe_s_obstacles = []
         self.x_range = [0, 100]
         self.y_range = [0, 100]
+        for s_obstacle in self.static_obstacles:
+            safe_boundary = s_obstacle.shape.buffer(2.0, resolution=16, join_style=2, mitre_limit=1)
+            self.safe_s_obstacles.append(safe_boundary)
 
     def is_collision(self, node_near, node_new):
-        for s_obstacle in list(self.env.static_obstacles.values())[1:]:
+        for s_obstacle in self.safe_s_obstacles:
             path = LineString([(node_near.x, node_near.y), (node_new.x, node_new.y)])
-            if path.intersects(s_obstacle.shape.convex_hull):
+            if path.intersects(s_obstacle):
                 return True
         return False
 
@@ -65,7 +73,7 @@ class RrtStar:
             node_new = self.new_state(node_near, node_rand)
 
             if k % 500 == 0:
-                print(k)
+                print(f"[planning] {k} / {self.iter_max}")
 
             if node_new and not self.is_collision(node_near, node_new):
                 neighbor_index = self.find_near_neighbor(node_new)
@@ -78,7 +86,7 @@ class RrtStar:
         index = self.search_goal_parent()
         self.path = self.extract_path(self.vertex[index])
 
-        self.plotting.animation(self.vertex, self.path, "rrt*, N = " + str(self.iter_max))
+        # self.plotting.animation(self.vertex, self.path, "rrt*, N = " + str(self.iter_max))
 
     def new_state(self, node_start, node_goal):
         dist, theta = self.get_distance_and_angle(node_start, node_goal)
