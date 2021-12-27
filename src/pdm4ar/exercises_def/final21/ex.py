@@ -48,8 +48,7 @@ def algo_placeholder(ex_in):
     return None
 
 
-def get_final21() -> Exercise:
-    seed = 2
+def get_final21(seed: int) -> Exercise:
     test_values = [TestValueExFinal21(get_sim_context_static(seed)),
                    TestValueExFinal21(get_sim_context_dynamic(seed)),
                    ]

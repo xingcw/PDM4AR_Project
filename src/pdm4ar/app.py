@@ -38,7 +38,7 @@ class Pdm4arExercise(QuickApp):
                 c.add_report(report, report_type="PDM4AR")
 
 
-def exercise_without_compmake(exercise: str):
+def exercise_without_compmake(exercise: str, seed: int):
     if exercise not in available_exercises:
         raise ZValueError(f"Cannot find {exercise!r}", available=set(available_exercises))
     repo_dir = __file__
@@ -48,7 +48,7 @@ def exercise_without_compmake(exercise: str):
     assert os.path.isdir(repo_dir)
     out = os.path.join(repo_dir, "out")
 
-    ex = available_exercises[exercise]()
+    ex = available_exercises[exercise](seed)
     for i, alg_in in enumerate(ex.test_values):
         try:
             i_str = alg_in.str_id() + str(i)
@@ -56,7 +56,7 @@ def exercise_without_compmake(exercise: str):
             i_str = str(i)
         alg_out = ex.algorithm(alg_in)
         report = ex.report(alg_in, alg_out)
-        report_file = os.path.join(out, f"{exercise}-{i_str}.html")
+        report_file = os.path.join(out, f"{exercise}-{i_str}-{seed}.html")
         report.to_html(report_file)
 
 
