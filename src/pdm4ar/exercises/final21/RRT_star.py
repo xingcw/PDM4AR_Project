@@ -7,8 +7,8 @@ import math
 import numpy as np
 import collections
 from typing import Sequence
-import matplotlib.pyplot as plt
 from dg_commons.sim.models.obstacles import StaticObstacle
+from dg_commons.sim.models.spacecraft import SpacecraftState
 from shapely.geometry import LineString, Polygon
 from pdm4ar.exercises.final21.plot_path import Plotting
 
@@ -33,15 +33,32 @@ class QueueFIFO:
 
 
 class Node:
-    def __init__(self, n):
+    def __init__(self, n: Sequence):
+        assert len(n) == 2
         self.x = n[0]
         self.y = n[1]
+        self.psi = None
         self.parent = None
+        self.child = None
+
+    @classmethod
+    def from_state(cls, n: SpacecraftState):
+        return Node([n.x, n.y])
+
+    def point_to(self, n: "Node"):
+        dx = n.x - self.x
+        dy = n.y - self.y
+        return math.hypot(dx, dy), math.atan2(dy, dx)
+
+    def from_point(self, n: "Node"):
+        dx = self.x - n.x
+        dy = self.y - n.y
+        return math.hypot(dx, dy), math.atan2(dy, dx)
 
 
 class RrtStar:
-    def __init__(self, x_start, x_goal, step_len, goal_sample_rate, search_radius, iter_max,
-                 static_obstacles: Sequence[StaticObstacle]):
+    def __init__(self, x_start, x_goal, static_obstacles: Sequence[StaticObstacle], visualize=False,
+                 step_len=10, goal_sample_rate=0.1, search_radius=20, iter_max=2000, safe_offset=3.0):
         self.s_start = Node(x_start)
         self.s_goal = Node(x_goal)
         self.step_len = step_len
@@ -50,17 +67,20 @@ class RrtStar:
         self.iter_max = iter_max
         self.vertex = [self.s_start]
         self.plotting = Plotting(x_start, x_goal)
+        self.visualize = visualize
         self.path = []
         self.static_obstacles = static_obstacles
-        self.offset = 3.0
-        self.safe_s_obstacles = []
-
+        self.offset = safe_offset
         # environment boarder
         env = self.static_obstacles[0].shape
         self.x_range = [env.bounds[0], env.bounds[2]]
         self.y_range = [env.bounds[1], env.bounds[3]]
-        minx, maxx = env.bounds[0] + self.offset, env.bounds[2] - self.offset
-        miny, maxy = env.bounds[1] + self.offset, env.bounds[3] - self.offset
+        self.safe_s_obstacles = []
+        self.get_safe_obstacles()
+
+    def get_safe_obstacles(self):
+        minx, maxx = self.x_range[0] + self.offset, self.x_range[1] - self.offset
+        miny, maxy = self.y_range[0] + self.offset, self.y_range[1] - self.offset
         safe_boundary = LineString([(minx, miny), (minx, maxy), (maxx, maxy), (maxx, miny), (minx, miny)])
         self.safe_s_obstacles.append(safe_boundary)
         for s_obstacle in self.static_obstacles[1:]:
@@ -100,7 +120,8 @@ class RrtStar:
         index = self.search_goal_parent()
         self.path = self.extract_path(self.vertex[index])
 
-        # self.plotting.animation(self.vertex, self.path, "rrt*, N = " + str(self.iter_max))
+        if self.visualize:
+            self.plotting.animation(self.vertex, self.path, "rrt*, N = " + str(self.iter_max))
 
     def new_state(self, node_start, node_goal):
         dist, theta = self.get_distance_and_angle(node_start, node_goal)
@@ -115,14 +136,12 @@ class RrtStar:
 
     def choose_parent(self, node_new, neighbor_index):
         cost = [self.get_new_cost(self.vertex[i], node_new) for i in neighbor_index]
-
         cost_min_index = neighbor_index[int(np.argmin(cost))]
         node_new.parent = self.vertex[cost_min_index]
 
     def rewire(self, node_new, neighbor_index):
         for i in neighbor_index:
             node_neighbor = self.vertex[i]
-
             if self.cost(node_neighbor) > self.get_new_cost(node_new, node_neighbor):
                 node_neighbor.parent = node_new
 
@@ -208,15 +227,3 @@ class RrtStar:
         dx = node_end.x - node_start.x
         dy = node_end.y - node_start.y
         return math.hypot(dx, dy), math.atan2(dy, dx)
-
-#
-# def main():
-#     x_start = (18, 8)  # Starting node
-#     x_goal = (37, 18)  # Goal node
-#
-#     rrt_star = RrtStar(x_start, x_goal, 10, 0.10, 20, 10000)
-#     rrt_star.planning()
-#
-#
-# if __name__ == '__main__':
-#     main()
