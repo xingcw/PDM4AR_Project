@@ -67,11 +67,17 @@ class RrtStar:
             safe_boundary = s_obstacle.shape.buffer(self.offset, resolution=16, join_style=2, mitre_limit=1).exterior
             self.safe_s_obstacles.append(safe_boundary)
 
-    def is_collision(self, node_near, node_new):
-        for s_obstacle in self.safe_s_obstacles:
-            path = LineString([(node_near.x, node_near.y), (node_new.x, node_new.y)])
-            if path.intersects(s_obstacle):
-                return True
+    def is_collision(self, node_near, node_new, safety=True):
+        if safety:
+            for s_obstacle in self.safe_s_obstacles:
+                path = LineString([(node_near.x, node_near.y), (node_new.x, node_new.y)])
+                if path.intersects(s_obstacle):
+                    return True
+        else:
+            for s_obstacle in self.static_obstacles:
+                path = LineString([(node_near.x, node_near.y), (node_new.x, node_new.y)])
+                if path.intersects(s_obstacle.shape.convex_hull.exterior):
+                    return True
         return False
 
     def planning(self):
