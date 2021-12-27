@@ -52,19 +52,19 @@ class RrtStar:
         self.plotting = Plotting(x_start, x_goal)
         self.path = []
         self.static_obstacles = static_obstacles
+        self.offset = 3.0
         self.safe_s_obstacles = []
 
         # environment boarder
         env = self.static_obstacles[0].shape
         self.x_range = [env.bounds[0], env.bounds[2]]
         self.y_range = [env.bounds[1], env.bounds[3]]
-        offset = 2.0
-        minx, maxx = env.bounds[0] + offset, env.bounds[2] - offset
-        miny, maxy = env.bounds[1] + offset, env.bounds[3] - offset
+        minx, maxx = env.bounds[0] + self.offset, env.bounds[2] - self.offset
+        miny, maxy = env.bounds[1] + self.offset, env.bounds[3] - self.offset
         safe_boundary = LineString([(minx, miny), (minx, maxy), (maxx, maxy), (maxx, miny), (minx, miny)])
         self.safe_s_obstacles.append(safe_boundary)
         for s_obstacle in self.static_obstacles[1:]:
-            safe_boundary = s_obstacle.shape.buffer(2.0, resolution=16, join_style=2, mitre_limit=1).exterior
+            safe_boundary = s_obstacle.shape.buffer(self.offset, resolution=16, join_style=2, mitre_limit=1).exterior
             self.safe_s_obstacles.append(safe_boundary)
 
     def is_collision(self, node_near, node_new):
@@ -127,7 +127,8 @@ class RrtStar:
         if len(node_index) > 0:
             cost_list = [dist_list[i] + self.cost(self.vertex[i]) for i in node_index
                          if not self.is_collision(self.vertex[i], self.s_goal)]
-            return node_index[int(np.argmin(cost_list))]
+            if len(cost_list) > 0:
+                return node_index[int(np.argmin(cost_list))]
 
         return len(self.vertex) - 1
 

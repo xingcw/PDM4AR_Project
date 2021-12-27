@@ -56,11 +56,13 @@ class Pdm4arAgent(Agent):
         self.current_goal = None
         self.last_goal = None
         self.current_state = None
+        self.visualize = False
         self.name = None
         self.GO = False
         self.ROT = False
         self.STOP = False
         self.max_vx = 0
+        self.seed = 4
         self.drift_angle = 0
 
     def on_episode_init(self, my_name: PlayerName):
@@ -116,7 +118,8 @@ class Pdm4arAgent(Agent):
             elif self.reach_goal() and self.GO:
                 command = self.stop()
 
-            self.plot_state()
+            if self.visualize:
+                self.plot_state()
             print(self.current_state)
             print(f"last goal: 'x: {self.last_goal.x}, y: {self.last_goal.y}")
             print(f"current goal: 'x: {self.current_goal.x}, y: {self.current_goal.y}")
@@ -162,7 +165,7 @@ class Pdm4arAgent(Agent):
             return command
         else:
             if self.planner is None:
-                np.random.seed(3)
+                np.random.seed(self.seed)
                 self.replan()
             self.update_current_goal(self.get_furthest_no_collision_waypoint())
             # if np.linalg.norm(self.last_goal.point_to(self.current_goal)) < 5:

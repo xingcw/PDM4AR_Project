@@ -5,7 +5,7 @@ Plotting tools for Sampling-based algorithms
 
 import matplotlib
 import matplotlib.pyplot as plt
-matplotlib.use('TkAgg')
+# matplotlib.use('TkAgg')
 
 
 class Plotting:
