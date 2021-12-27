@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TypeVar, Callable, Sequence, Generic
+from typing import TypeVar, Callable, Sequence, Generic, Tuple
 
 from reprep import Report
 
