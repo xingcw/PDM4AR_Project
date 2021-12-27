@@ -88,9 +88,9 @@ class Pdm4arAgent(Agent):
             if not self.ready_togo() and self.ROT:
                 self.GO = False
                 self.ROT = True
-                a = self.current_state.psi - self.current_goal.psi + self.current_state.dpsi
-                a_l = self.bind_to_range(3 * a, -A_MAX, A_MAX)
-                a_r = self.bind_to_range(-3 * a, -A_MAX, A_MAX)
+                a = self.current_state.psi - self.current_goal.psi + 2 * self.current_state.dpsi
+                a_l = self.bind_to_range(a, -A_MAX, A_MAX)
+                a_r = self.bind_to_range(-a, -A_MAX, A_MAX)
                 command = SpacecraftCommands(acc_left=a_l, acc_right=a_r)
                 print(f"[reach goal and rotate] target psi: {self.current_goal.psi}")
             elif self.ready_togo() and not self.GO:
@@ -99,18 +99,19 @@ class Pdm4arAgent(Agent):
                 # self.update_current_goal(self.get_furthest_no_collision_waypoint())
                 print(f"[ready to go] next goal: 'x: {self.current_goal.x}, y: {self.current_goal.y}'")
             elif not self.reach_goal() and self.GO:
+                # self.update_current_goal()
                 if self.check_future_collision():
                     steer = self.get_steer_direct()
                     if steer == "left":
-                        command = SpacecraftCommands(acc_left=-A_MAX, acc_right=-A_MAX/2)
+                        command = SpacecraftCommands(acc_left=-A_MAX, acc_right=-0.9*A_MAX)
                         print(f"[collision warning] steer to the left!")
                     else:
-                        command = SpacecraftCommands(acc_left=-A_MAX/2, acc_right=-A_MAX)
+                        command = SpacecraftCommands(acc_left=-0.9*A_MAX, acc_right=-A_MAX)
                         print(f"[collision warning] steer to the right!")
                 else:
                     delta_s = self.current_goal.point_to(self.current_state)
                     dsa = np.linalg.norm(delta_s)
-                    dpsia = 2 * (self.current_state.psi - self.current_goal.psi) + self.current_state.dpsi
+                    dpsia = 2 * (self.current_state.psi - self.current_goal.psi) + self.current_state.dpsi - self.current_state.vy
                     al = self.bind_to_range(dsa - 2 * self.current_state.vx + dpsia, -A_MAX, A_MAX)
                     ar = self.bind_to_range(dsa - 2 * self.current_state.vx - dpsia, -A_MAX, A_MAX)
                     command = SpacecraftCommands(acc_left=al, acc_right=ar)
@@ -127,16 +128,20 @@ class Pdm4arAgent(Agent):
 
         return command
 
-    def update_current_goal(self, goal_waypoint):
+    def update_current_goal(self, goal_waypoint=None):
         current_point = self.current_state.as_ndarray()[:2]
-        if self.current_goal is None:
-            self.last_goal = Waypoints(current_point)
+        if goal_waypoint is None:
+            goal_point = np.array([self.current_goal.x, self.current_goal.y])
+            path = goal_point - current_point
         else:
-            self.last_goal = self.current_goal
-        goal_point = np.array([goal_waypoint.x, goal_waypoint.y])
-        path = goal_point - current_point
-        self.max_vx = np.sqrt(A_MAX * np.linalg.norm(path))
-        self.current_goal = Waypoints(goal_point)
+            if self.current_goal is None:
+                self.last_goal = Waypoints(current_point)
+            else:
+                self.last_goal = self.current_goal
+            goal_point = np.array([goal_waypoint.x, goal_waypoint.y])
+            path = goal_point - current_point
+            self.max_vx = np.sqrt(A_MAX * np.linalg.norm(path))
+            self.current_goal = Waypoints(goal_point)
         self.current_goal.psi = np.arctan2(path[1], path[0])
 
     def reach_goal(self, thresh=5.0):
@@ -206,18 +211,18 @@ class Pdm4arAgent(Agent):
         safe_dist = self.get_safe_distance()
         stop_point = Node([self.current_state.x + safe_dist * np.cos(angle),
                            self.current_state.y + safe_dist * np.sin(angle)])
-        return self.planner.is_collision(current_point, stop_point)
+        return self.planner.is_collision(current_point, stop_point, safety=False)
 
-    def get_steer_direct(self, angle_dt=0.2):
-        psi_l = self.current_state.psi + self.drift_angle + angle_dt
-        psi_r = self.current_state.psi + self.drift_angle - angle_dt
+    def get_steer_direct(self, angle_dt=0.1):
+        psi_l = self.current_state.psi + angle_dt
+        psi_r = self.current_state.psi - angle_dt
         left_collision = self.check_future_collision(psi_l)
         right_collision = self.check_future_collision(psi_r)
 
         if left_collision:
-            return "left"
-        elif right_collision:
             return "right"
+        elif right_collision:
+            return "left"
         elif self.drift_angle + self.current_state.psi > self.current_goal.psi:
             return "right"
         else:
@@ -244,7 +249,8 @@ class Pdm4arAgent(Agent):
             waypoint.get_psi()
 
     def plot_state(self):
-        axs = plt.gca()
+        # axs = plt.gca()
+        _, axs = plt.subplots()
         shapely_viz = ShapelyViz(axs)
 
         # plot original obstacles
@@ -282,11 +288,11 @@ class Pdm4arAgent(Agent):
         # axs.text(x_tail + 1, y_tail - .4, "$V_y$")
 
         # plot scan lanes
-        angle_dt = 0.2
+        angle_dt = 0.1
         dist = self.get_safe_distance()
-        psi_l = self.current_state.psi + self.drift_angle + angle_dt
-        psi_c = self.current_state.psi + self.drift_angle
-        psi_r = self.current_state.psi + self.drift_angle - angle_dt
+        psi_l = self.current_state.psi + angle_dt
+        psi_c = self.current_state.psi
+        psi_r = self.current_state.psi - angle_dt
         dx_l, dy_l = dist * np.cos(psi_l), dist * np.sin(psi_l)
         dx_c, dy_c = dist * np.cos(psi_c), dist * np.sin(psi_c)
         dx_r, dy_r = dist * np.cos(psi_r), dist * np.sin(psi_r)
