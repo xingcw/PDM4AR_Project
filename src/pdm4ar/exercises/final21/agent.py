@@ -156,9 +156,9 @@ class Pdm4arAgent(Agent):
         return self.waypoints[idx]
 
     def get_furthest_no_collision_waypoint(self):
-        if not self.planner.is_collision(self.current_state, self.planner.s_goal):
+        if not self.planner.is_collision(self.current_state, self.planner.s_goal, offset=1.0):
             return self.waypoints[-1]
-        collision = np.array([self.planner.is_collision(self.current_state, waypoint) for waypoint in self.waypoints])
+        collision = np.array([self.planner.is_collision(self.current_state, waypoint, offset=2.0) for waypoint in self.waypoints])
         state = np.array([self.current_state.x, self.current_state.y])
         waypoints = np.array([[waypoint.x, waypoint.y] for waypoint in self.waypoints])
         distance = np.linalg.norm(state - waypoints, axis=1)
@@ -179,7 +179,7 @@ class Pdm4arAgent(Agent):
         safe_dist = self.get_safe_distance()
         stop_point = Node([self.current_state.x + safe_dist * np.cos(angle),
                            self.current_state.y + safe_dist * np.sin(angle)])
-        return self.planner.is_collision(current_point, stop_point, safety=False)
+        return self.planner.is_collision(current_point, stop_point, offset=0.0)
 
     def get_steer_direct(self, angle_dt=0.1):
         psi_l = self.current_state.psi + angle_dt
@@ -199,7 +199,7 @@ class Pdm4arAgent(Agent):
     def replan(self):
         x_start = (self.current_state.x, self.current_state.y)
         x_goal = (self.goal.goal.centroid.x, self.goal.goal.centroid.y)
-        self.planner = RrtStar(x_start, x_goal, self.static_obstacles)
+        self.planner = RrtStar(x_start, x_goal, self.static_obstacles, safe_offset=3.0)
         self.planner.planning()
         self.waypoints = []
 

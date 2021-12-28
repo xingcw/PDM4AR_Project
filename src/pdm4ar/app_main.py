@@ -5,6 +5,7 @@ from pdm4ar.app import exercise_without_compmake
 
 if __name__ == "__main__":
     contracts.disable_all()
+    # exercise_without_compmake("final21", seed=249)
     static_records, dynamic_records = [], []
     columns = ["seed", "goal", "collision", "distance", "time"]
     for i, seed in enumerate(np.random.choice(1000, size=(100,), replace=False)):
