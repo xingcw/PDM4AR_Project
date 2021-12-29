@@ -55,12 +55,21 @@ class Node:
         dy = self.y - n.y
         return math.hypot(dx, dy), math.atan2(dy, dx)
 
+    def equal(self, b: "Node"):
+        return True if self.x == b.x and self.y == b.y else False
+
+    def is_bound_in_range(self, x_range: Sequence, y_range: Sequence):
+        assert len(x_range) == 2 and len(y_range) == 2
+        x_range = sorted(x_range)
+        y_range = sorted(y_range)
+        return True if x_range[0] < self.x < x_range[1] and y_range[0] < self.y < y_range[1] else False
+
 
 class RrtStar:
     def __init__(self, x_start, x_goal, static_obstacles: Sequence[StaticObstacle], visualize=False,
                  step_len=10, goal_sample_rate=0.1, search_radius=20, iter_max=2000, safe_offset=3.0):
-        self.s_start = Node(x_start)
-        self.s_goal = Node(x_goal)
+        self.s_start = x_start
+        self.s_goal = x_goal
         self.step_len = step_len
         self.goal_sample_rate = goal_sample_rate
         self.search_radius = search_radius
@@ -81,10 +90,10 @@ class RrtStar:
 
     def get_safe_obstacles(self, offset=2.0):
         safe_s_obstacles = []
-        minx, maxx = self.x_range[0] + offset, self.x_range[1] - offset
-        miny, maxy = self.y_range[0] + offset, self.y_range[1] - offset
-        safe_boundary = LineString([(minx, miny), (minx, maxy), (maxx, maxy), (maxx, miny), (minx, miny)])
-        safe_s_obstacles.append(safe_boundary)
+        # minx, maxx = self.x_range[0] + offset, self.x_range[1] - offset
+        # miny, maxy = self.y_range[0] + offset, self.y_range[1] - offset
+        # safe_boundary = LineString([(minx, miny), (minx, maxy), (maxx, maxy), (maxx, miny), (minx, miny)])
+        # safe_s_obstacles.append(safe_boundary)
         for s_obstacle in self.static_obstacles[1:]:
             safe_boundary = s_obstacle.shape.buffer(offset, resolution=16, join_style=2, mitre_limit=1).exterior
             safe_s_obstacles.append(safe_boundary)

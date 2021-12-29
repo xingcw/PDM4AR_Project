@@ -29,6 +29,7 @@ class Pdm4arAgent(Agent):
                  sg: SpacecraftGeometry,
                  sp: SpacecraftGeometry):
         self.goal = goal
+        self.goal_pos = Node([self.goal.goal.centroid.x, self.goal.goal.centroid.y])
         self.static_obstacles = static_obstacles
         self.sg = sg
         self.sp = sp
@@ -91,7 +92,7 @@ class Pdm4arAgent(Agent):
                 else:
                     ds_a, _ = self.current_pos.point_to(self.current_goal)
                     dpsi_a = 2 * (self.current_state.psi - self.current_goal.psi) + \
-                            self.current_state.dpsi - self.current_state.vy
+                             self.current_state.dpsi - self.current_state.vy
                     al = self.bind_to_range(ds_a - 2 * self.current_state.vx + dpsi_a, -A_MAX, A_MAX)
                     ar = self.bind_to_range(ds_a - 2 * self.current_state.vx - dpsi_a, -A_MAX, A_MAX)
                     command = SpacecraftCommands(acc_left=al, acc_right=ar)
@@ -101,6 +102,7 @@ class Pdm4arAgent(Agent):
 
             if self.visualize:
                 self.plot_state()
+
             print(self.current_state)
             print(f"last goal: 'x: {self.last_goal.x}, y: {self.last_goal.y}")
             print(f"current goal: 'x: {self.current_goal.x}, y: {self.current_goal.y}")
@@ -118,14 +120,14 @@ class Pdm4arAgent(Agent):
         dist, angle = self.current_pos.point_to(self.current_goal)
         self.current_goal.psi = angle
 
-    def reach_goal(self, thresh=5.0):
+    def reach_goal(self, thresh=3.0):
         if np.abs(self.current_state.x - self.current_goal.x) < thresh and \
                 np.abs(self.current_state.y - self.current_goal.y) < thresh:
             return True
         else:
             return False
 
-    def ready_togo(self, thresh=0.05):
+    def ready_togo(self, thresh=0.02):
         if np.abs(self.current_state.psi - self.current_goal.psi) < thresh and np.abs(self.current_state.dpsi) < thresh:
             return True
         else:
@@ -143,7 +145,23 @@ class Pdm4arAgent(Agent):
             if self.planner is None:
                 np.random.seed(self.seed)
                 self.replan()
-            self.update_current_goal(self.get_furthest_no_collision_waypoint())
+                iteration = 0
+                while self.is_large_num_stops() and iteration < 4:
+                    iteration += 1
+                    print(f"[replanning] replan {iteration}th time, due to too many stops! \n")
+                    self.replan()
+
+            candidate_goal = self.get_furthest_no_collision_waypoint()
+            if candidate_goal is None:
+                iteration = 0
+                print(f"[replanning] cannot find the next goal available!")
+                while candidate_goal is None and self.is_large_num_stops() and iteration < 4:
+                    iteration += 1
+                    print(f"[replanning] replan {iteration}th time, due to too many stops!")
+                    self.replan()
+                    candidate_goal = self.get_furthest_no_collision_waypoint()
+
+            self.update_current_goal(candidate_goal)
             self.STOP = False
             self.ROT = True
             self.GO = False
@@ -155,19 +173,83 @@ class Pdm4arAgent(Agent):
         idx = np.argmin(waypoints - state)
         return self.waypoints[idx]
 
-    def get_furthest_no_collision_waypoint(self):
-        if not self.planner.is_collision(self.current_state, self.planner.s_goal, offset=1.0):
+    def get_furthest_no_collision_waypoint(self, current_pos=None):
+        if current_pos is None:
+            current_pos = self.current_pos
+        if not self.planner.is_collision(current_pos, self.planner.s_goal, offset=2.0):
             return self.waypoints[-1]
-        collision = np.array([self.planner.is_collision(self.current_state, waypoint, offset=2.0) for waypoint in self.waypoints])
-        state = np.array([self.current_state.x, self.current_state.y])
+        collision = np.array(
+            [self.planner.is_collision(current_pos, waypoint, offset=2.0) for waypoint in self.waypoints])
+        state = np.array([current_pos.x, current_pos.y])
         waypoints = np.array([[waypoint.x, waypoint.y] for waypoint in self.waypoints])
         distance = np.linalg.norm(state - waypoints, axis=1)
         no_collision_dist = np.multiply(distance, ~collision)
         idx = np.argmax(no_collision_dist)
-        next_goal = self.waypoints[idx]
-        self.waypoints[idx].parent = None
+        candidate_goal = self.waypoints[idx]
+
+        if self.current_goal is not None and candidate_goal.equal(self.current_goal):
+            return None
+
+        if self.sampling_check_collision(candidate_goal):
+            new_candidate = self.resample_goal(candidate_goal)
+            if new_candidate is None:
+                if not self.sampling_check_collision(candidate_goal.parent) and \
+                        not self.current_pos.equal(candidate_goal.parent):
+                    print(f"[resample next goal] sampling not available, try its parent...")
+                    candidate_goal = candidate_goal.parent
+                    idx -= 1
+                else:
+                    return None
+            else:
+                print(f"[resample next goal] sampling... \n")
+                candidate_goal = new_candidate
+
         self.waypoints = self.waypoints[idx:]
-        return next_goal
+        return candidate_goal
+
+    def is_large_num_stops(self, max_num_steps=4):
+        start_point = self.current_pos
+        end_point = self.current_pos
+        origin_waypoints = self.waypoints
+        num_stops = 0
+
+        while not end_point.equal(self.goal_pos) and num_stops < max_num_steps:
+            end_point = self.get_furthest_no_collision_waypoint(start_point)
+            if end_point is None:
+                num_stops = max_num_steps
+                break
+            start_point = end_point
+            num_stops += 1
+
+        self.waypoints = origin_waypoints
+        return False if num_stops < max_num_steps else True
+
+    def sampling_check_collision(self, waypoint: Node, radius=5.0):
+        if waypoint.equal(self.goal_pos):
+            return False
+        sampling_angles = np.linspace(-np.pi, np.pi, 12)
+        for aa in sampling_angles:
+            x = waypoint.x + radius * np.cos(aa)
+            y = waypoint.y + radius * np.sin(aa)
+            check_point = Node([x, y])
+            if self.planner.is_collision(waypoint, check_point, offset=2.0):
+                return True
+        return False
+
+    def resample_goal(self, candidate: Node, radius=5.0):
+        dist, psi = self.current_pos.point_to(candidate)
+        sampling_angles = np.linspace(psi - np.pi / 2, psi + np.pi / 2, 7)
+        sampling_order = np.flipud(np.argsort(np.abs(sampling_angles - psi)))
+        sampling_angles = sampling_angles[sampling_order]
+        for aa in sampling_angles:
+            x = candidate.x + radius * np.cos(aa)
+            y = candidate.y + radius * np.sin(aa)
+            new_candidate = Node([x, y])
+            if not self.planner.is_collision(self.current_pos, new_candidate, offset=2.0) and \
+                    not self.sampling_check_collision(new_candidate, radius) \
+                    and new_candidate.is_bound_in_range([2.0, 98.0], [2.0, 98.0]):
+                return new_candidate
+        return None
 
     def get_safe_distance(self):
         v = np.linalg.norm([self.current_state.vx, self.current_state.vy])
@@ -197,9 +279,7 @@ class Pdm4arAgent(Agent):
             return "left"
 
     def replan(self):
-        x_start = (self.current_state.x, self.current_state.y)
-        x_goal = (self.goal.goal.centroid.x, self.goal.goal.centroid.y)
-        self.planner = RrtStar(x_start, x_goal, self.static_obstacles, safe_offset=3.0)
+        self.planner = RrtStar(self.current_pos, self.goal_pos, self.static_obstacles, safe_offset=3.0)
         self.planner.planning()
         self.waypoints = []
 
@@ -232,7 +312,7 @@ class Pdm4arAgent(Agent):
         axs.set_aspect("equal")
 
         # plot safe boundary of obstacles
-        for safe_s_obstacle in self.planner.safe_s_obstacles:
+        for safe_s_obstacle in self.planner.safe_s_obstacles[self.planner.offset]:
             axs.plot(*safe_s_obstacle.xy)
 
         # plot planned path
