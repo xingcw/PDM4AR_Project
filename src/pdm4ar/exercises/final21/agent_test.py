@@ -2,7 +2,8 @@ import matplotlib
 from dg_commons.maps.shapely_viz import ShapelyViz
 from dg_commons.sim.simulator_visualisation import ZOrders
 from matplotlib import pyplot as plt
-
+import sys
+sys.path.append("..")
 from pdm4ar.exercises_def.final21.scenario import get_dgscenario
 from RRT_star import RrtStar
 
@@ -19,7 +20,7 @@ if __name__ == '__main__':
     ax.autoscale()
     ax.set_facecolor('k')
     ax.set_aspect("equal")
-    # plt.show()
+    plt.show()
 
     x_start = (x0.x, x0.y)
     x_goal = (goal.goal.centroid.x, goal.goal.centroid.y)
