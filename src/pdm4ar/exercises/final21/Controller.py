@@ -27,6 +27,7 @@ class MPCController(object):
         # define target as time varying parameter
         x_gt = model.set_variable(var_type='_tvp', var_name='x_gt', shape=(1, 1))
         y_gt = model.set_variable(var_type='_tvp', var_name='y_gt', shape=(1, 1))
+        vy_gt = model.set_variable(var_type='_tvp', var_name='vy_gt', shape=(1, 1))
         psi_gt = model.set_variable(var_type='_tvp', var_name='psi_gt', shape=(1, 1))
 
         # system dynamics
@@ -44,9 +45,9 @@ class MPCController(object):
         # setup MPC controller
         mpc = do_mpc.controller.MPC(model)
         setup_mpc = {
-            'n_horizon': 20,
+            'n_horizon': 30,
             't_step': 0.1,
-            'n_robust': 1,
+            'n_robust': 0,
             'store_full_solution': False,
         }
         mpc.set_param(**setup_mpc)
@@ -54,13 +55,13 @@ class MPCController(object):
 
         # objective setup
         # TODO: tuning Q, R weights
-        mterm = (x - x_gt) ** 2 + (y - y_gt) ** 2 + 5 * (psi - psi_gt) ** 2
-        lterm = (x - x_gt) ** 2 + (y - y_gt) ** 2 + 5 * (psi - psi_gt) ** 2
+        mterm = 3 * (x - x_gt) ** 2 + 3 * (y - y_gt) ** 2 + 5 * (psi - psi_gt) ** 2 + 2 * (vy - vy_gt) ** 2
+        lterm = 3 * (x - x_gt) ** 2 + 3 * (y - y_gt) ** 2 + 5 * (psi - psi_gt) ** 2 + 2 * (vy - vy_gt) ** 2
 
         mpc.set_objective(mterm=mterm, lterm=lterm)
         mpc.set_rterm(
-            acc_l=1e-1,
-            acc_r=1e-1
+            acc_l=1e-2,
+            acc_r=1e-2
         )
 
         # constraints
@@ -100,6 +101,7 @@ class MPCController(object):
                 tvp_template['_tvp', k, 'x_gt'] = plan_sequence[k].x
                 tvp_template['_tvp', k, 'y_gt'] = plan_sequence[k].y
                 tvp_template['_tvp', k, 'psi_gt'] = plan_sequence[k].psi
+                tvp_template['_tvp', k, 'vy_gt'] = 0
             return tvp_template
 
         self.mpc.set_tvp_fun(tvp_fun)

@@ -34,6 +34,7 @@ class Pdm4arAgent(Agent):
         self.static_obstacles = static_obstacles
         self.sg = sg
         self.sp = sp
+        self.debug = False
         self.planner = None
         self.current_state = None
         self.current_goal = None
@@ -78,11 +79,18 @@ class Pdm4arAgent(Agent):
 
         self.t_step += 1
         dpoints = self.dpoints[self.t_step:]
-        controller = MPCController(dpoints, self.sg, self.current_state.as_ndarray())
-        commands = controller.mpc_command(self.current_state.as_ndarray(), dpoints).squeeze()
-        commands = SpacecraftCommands(acc_left=commands[0], acc_right=commands[1])
+        if len(dpoints) < 30:
+            dpoints.append(dpoints[-1])
+        try:
+            controller = MPCController(dpoints, self.sg, self.current_state.as_ndarray())
+            commands = controller.mpc_command(self.current_state.as_ndarray(), dpoints).squeeze()
+            commands = SpacecraftCommands(acc_left=commands[0], acc_right=commands[1])
+        except:
+            commands = SpacecraftCommands(acc_left=0, acc_right=0)
         print(commands)
-        self.plot_state()
+        print(self.current_state)
+        if self.debug:
+            self.plot_state()
         return commands
 
     def get_stops(self, max_num_steps=8):
@@ -187,12 +195,21 @@ class Pdm4arAgent(Agent):
             dist, angle = waypoint.point_to(waypoint.child)
             waypoint.psi = angle
 
-    def discretize(self, waypoints: Sequence[Node], step_size=1.0):
-        # TODO: resolve the discretization around the terminal state
+    def discretize(self, waypoints: Sequence[Node], turning_dist=10):
         dpoints = []
         for start, end in zip(waypoints[:-1], waypoints[1:]):
             dist, aa = start.point_to(end)
-            dists = np.linspace(0, dist, np.ceil(dist/step_size).astype(int), endpoint=False)
+            # using adaptive step size
+            step_size = self.bind_to_range(dist/50, 0.2, 1.0)
+            dists = np.linspace(0, dist, np.ceil(dist / step_size).astype(int), endpoint=False)
+            if dist > turning_dist:
+                start_dists = np.linspace(0, turning_dist/2, np.ceil(turning_dist / (2*step_size)).astype(int),
+                                          endpoint=False)
+                dists = np.linspace(turning_dist/2, dist - turning_dist/2, np.ceil(dist / step_size).astype(int),
+                                    endpoint=False)
+                turning_dists = np.linspace(dist - turning_dist/2, dist, np.ceil(turning_dist / step_size).astype(int),
+                                            endpoint=False)
+                dists = np.hstack([start_dists, dists, turning_dists])
             dxs, dys = dists * np.cos(aa), dists * np.sin(aa)
             ddpoints = [Node([p[0] + start.x, p[1] + start.y]) for p in np.vstack([dxs, dys]).transpose()]
             for p in ddpoints:
@@ -200,7 +217,7 @@ class Pdm4arAgent(Agent):
             dpoints.extend(ddpoints)
         end_pos = self.goal_pos
         end_pos.psi = dpoints[-1]
-        dpoints.extend([end_pos]*20)
+        dpoints.append(end_pos)
         return dpoints
 
     def plot_state(self):

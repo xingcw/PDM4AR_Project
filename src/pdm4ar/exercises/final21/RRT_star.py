@@ -67,7 +67,7 @@ class Node:
 
 class RrtStar:
     def __init__(self, x_start, x_goal, static_obstacles: Sequence[StaticObstacle], visualize=False,
-                 step_len=10, goal_sample_rate=0.1, search_radius=20, iter_max=2000, safe_offset=3.0):
+                 step_len=10, goal_sample_rate=0.1, search_radius=20, iter_max=2000, safe_offset=3.0, safe_boarder=3.0):
         self.s_start = x_start
         self.s_goal = x_goal
         self.step_len = step_len
@@ -80,6 +80,7 @@ class RrtStar:
         self.path = []
         self.static_obstacles = static_obstacles
         self.offset = safe_offset
+        self.safe_boarder = safe_boarder
         # environment boarder
         env = self.static_obstacles[0].shape
         self.x_range = [env.bounds[0], env.bounds[2]]
@@ -182,7 +183,7 @@ class RrtStar:
         return self.cost(node_start) + dist
 
     def generate_random_node(self, goal_sample_rate):
-        delta = 0.5
+        delta = self.safe_boarder
 
         if np.random.random() > goal_sample_rate:
             return Node((np.random.uniform(self.x_range[0] + delta, self.x_range[1] - delta),
