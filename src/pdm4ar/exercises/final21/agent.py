@@ -34,20 +34,19 @@ class Pdm4arAgent(Agent):
         self.static_obstacles = static_obstacles
         self.sg = sg
         self.sp = sp
-        self.debug = False
+        self.debug = True
         self.planner = None
         self.current_state = None
-        self.current_goal = None
         self.start_pos = None
         self.goal_pos = None
         self.waypoints = []
         self.dpoints = []
         self.stops = []
-        self.drift_angle = 0
         # TODO: get rid of time stamp
         self.t_step = 0
         self.name = None
         self.player = None
+        # TODO: remove later
         self.C0 = None
 
     def on_episode_init(self, my_name: PlayerName):
@@ -66,7 +65,6 @@ class Pdm4arAgent(Agent):
         # todo implement here
         self.player = sim_obs.players[self.name]
         self.current_state = self.player.state
-        self.drift_angle = np.arctan2(self.current_state.vy, self.current_state.vx)
         if self.planner is None:
             self.start_pos = Node.from_state(self.current_state)
             self.goal_pos = Node([self.goal.goal.centroid.x, self.goal.goal.centroid.y])
@@ -92,7 +90,7 @@ class Pdm4arAgent(Agent):
         print(commands)
         print(self.current_state)
         if self.debug:
-            self.plot_state(self.C0)
+            self.plot_state()
         return commands
 
     def get_stops(self, max_num_steps=8):
@@ -124,9 +122,6 @@ class Pdm4arAgent(Agent):
         no_collision_dist = np.multiply(distance, ~collision)
         idx = np.argmax(no_collision_dist)
         candidate_goal = self.waypoints[idx]
-
-        if self.current_goal is not None and candidate_goal.equal(self.current_goal):
-            return None
 
         if self.sampling_check_collision(candidate_goal):
             new_candidate = self.resample_goal(candidate_goal)
@@ -290,7 +285,7 @@ class Pdm4arAgent(Agent):
 
         return dpoints, np.array(C0).reshape(-1, 2)
 
-    def plot_state(self, C0):
+    def plot_state(self):
         # axs = plt.gca()
         _, axs = plt.subplots()
         shapely_viz = ShapelyViz(axs)
@@ -308,10 +303,10 @@ class Pdm4arAgent(Agent):
             axs.plot(*safe_s_obstacle.xy)
 
         # plot planned path
-        # axs.plot([x[0] for x in self.planner.path], [x[1] for x in self.planner.path], '-k', linewidth=2)
+        axs.plot([x[0] for x in self.planner.path], [x[1] for x in self.planner.path], '-k', linewidth=1)
 
         # plot discretized path
-        axs.scatter(C0[:, 0], C0[:, 1], marker="+", s=80, c="r")
+        axs.scatter(self.C0[:, 0], self.C0[:, 1], marker="+", s=80, c="r")
         axs.scatter([dp.x for dp in self.dpoints], [dp.y for dp in self.dpoints], marker=".", s=2, c="r")
 
         # plot velocities
@@ -323,8 +318,9 @@ class Pdm4arAgent(Agent):
         # axs.text(x_tail + 1, y_tail - .4, "$V_x$")
 
         v = np.linalg.norm(np.array([self.current_state.vx, self.current_state.vy]))
-        dx = v * np.cos(self.current_state.psi + self.drift_angle)
-        dy = v * np.sin(self.current_state.psi + self.drift_angle)
+        drift_angle = np.arctan2(self.current_state.vy, self.current_state.vx)
+        dx = v * np.cos(self.current_state.psi + drift_angle)
+        dy = v * np.sin(self.current_state.psi + drift_angle)
         axs.arrow(x_tail + 1, y_tail - .4, dx, dy, width=0.3, length_includes_head=True, color="k")
         # axs.text(x_tail + 1, y_tail - .4, "V")
 
