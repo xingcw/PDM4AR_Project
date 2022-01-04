@@ -42,6 +42,7 @@ class Pdm4arAgent(Agent):
         self.waypoints = []
         self.dpoints = []
         self.stops = []
+        self.visited_pts = []
         # TODO: get rid of time stamp
         self.t_step = 0
         self.name = None
@@ -65,6 +66,7 @@ class Pdm4arAgent(Agent):
         # todo implement here
         self.player = sim_obs.players[self.name]
         self.current_state = self.player.state
+        self.visited_pts.append([self.current_state.x, self.current_state.y])
         if self.planner is None:
             self.start_pos = Node.from_state(self.current_state)
             self.goal_pos = Node([self.goal.goal.centroid.x, self.goal.goal.centroid.y])
@@ -109,13 +111,13 @@ class Pdm4arAgent(Agent):
         self.waypoints = origin_waypoints
         return stops if end_point.equal(self.goal_pos) else None
 
-    def get_furthest_no_collision_waypoint(self, current_pos=None):
+    def get_furthest_no_collision_waypoint(self, current_pos=None, offset=3.0):
         if current_pos is None:
             current_pos = Node.from_state(self.current_state)
-        if not self.planner.is_collision(current_pos, self.planner.s_goal, offset=2.0):
+        if not self.planner.is_collision(current_pos, self.planner.s_goal, offset):
             return self.waypoints[-1]
         collision = np.array(
-            [self.planner.is_collision(current_pos, waypoint, offset=2.0) for waypoint in self.waypoints])
+            [self.planner.is_collision(current_pos, waypoint, offset) for waypoint in self.waypoints])
         state = np.array([current_pos.x, current_pos.y])
         waypoints = np.array([[waypoint.x, waypoint.y] for waypoint in self.waypoints])
         distance = np.linalg.norm(state - waypoints, axis=1)
@@ -123,10 +125,10 @@ class Pdm4arAgent(Agent):
         idx = np.argmax(no_collision_dist)
         candidate_goal = self.waypoints[idx]
 
-        if self.sampling_check_collision(candidate_goal):
-            new_candidate = self.resample_goal(candidate_goal)
+        if self.sampling_check_collision(candidate_goal, offset):
+            new_candidate = self.resample_goal(candidate_goal, offset)
             if new_candidate is None:
-                if not self.sampling_check_collision(candidate_goal.parent) and \
+                if not self.sampling_check_collision(candidate_goal.parent, offset) and \
                         not current_pos.equal(candidate_goal.parent):
                     print(f"[resample next goal] sampling not available, try its parent...")
                     candidate_goal = candidate_goal.parent
@@ -140,7 +142,7 @@ class Pdm4arAgent(Agent):
         self.waypoints = self.waypoints[idx:]
         return candidate_goal
 
-    def sampling_check_collision(self, waypoint: Node, radius=5.0):
+    def sampling_check_collision(self, waypoint: Node, offset=3.0, radius=5.0):
         if waypoint.equal(self.goal_pos):
             return False
         sampling_angles = np.linspace(-np.pi, np.pi, 12)
@@ -148,23 +150,23 @@ class Pdm4arAgent(Agent):
             x = waypoint.x + radius * np.cos(aa)
             y = waypoint.y + radius * np.sin(aa)
             check_point = Node([x, y])
-            if self.planner.is_collision(waypoint, check_point, offset=2.0):
+            if self.planner.is_collision(waypoint, check_point, offset):
                 return True
         return False
 
-    def resample_goal(self, candidate: Node, radius=5.0):
+    def resample_goal(self, candidate: Node, offset=3.0, radius=5.0):
         current_pos = Node.from_state(self.current_state)
         dist, psi = current_pos.point_to(candidate)
         sampling_angles = np.linspace(psi - np.pi / 2, psi + np.pi / 2, 7)
         sampling_order = np.flipud(np.argsort(np.abs(sampling_angles - psi)))
         sampling_angles = sampling_angles[sampling_order]
         # get the safe boundary of the environment
-        x_range, y_range = self.planner.get_safe_env_bound(offset=3.0)
+        x_range, y_range = self.planner.get_safe_env_bound(offset)
         for aa in sampling_angles:
             x = candidate.x + radius * np.cos(aa)
             y = candidate.y + radius * np.sin(aa)
             new_candidate = Node([x, y])
-            if not self.planner.is_collision(current_pos, new_candidate, offset=2.0) and \
+            if not self.planner.is_collision(current_pos, new_candidate, offset) and \
                     not self.sampling_check_collision(new_candidate, radius) \
                     and new_candidate.is_bound_in_range(x_range, y_range):
                 return new_candidate
@@ -194,94 +196,55 @@ class Pdm4arAgent(Agent):
             dist, angle = waypoint.point_to(waypoint.child)
             waypoint.psi = angle
 
-    def discretize(self, waypoints: List[Node], turning_dist=10):
-        dpoints = []
-        for start, end in zip(waypoints[:-1], waypoints[1:]):
-            dist, aa = start.point_to(end)
-            # using adaptive step size
-            step_size = self.bind_to_range(dist / 50, 0.2, 1.0)
-            dists = np.linspace(0, dist, np.ceil(dist / step_size).astype(int), endpoint=False)
-            if dist > turning_dist:
-                start_dists = np.linspace(0, turning_dist / 2, np.ceil(turning_dist / (2 * step_size)).astype(int),
-                                          endpoint=False)
-                dists = np.linspace(turning_dist / 2, dist - turning_dist / 2, np.ceil(dist / step_size).astype(int),
-                                    endpoint=False)
-                turning_dists = np.linspace(dist - turning_dist / 2, dist,
-                                            np.ceil(turning_dist / step_size).astype(int),
-                                            endpoint=False)
-                dists = np.hstack([start_dists, dists, turning_dists])
-            dxs, dys = dists * np.cos(aa), dists * np.sin(aa)
-            ddpoints = [Node([p[0] + start.x, p[1] + start.y]) for p in np.vstack([dxs, dys]).transpose()]
-            for p in ddpoints:
-                p.psi = aa
-            dpoints.extend(ddpoints)
-        end_pos = self.goal_pos
-        end_pos.psi = dpoints[-1]
-        dpoints.append(end_pos)
-        return dpoints
-
     def fit_turning_curve(self, waypoints: List[Node], turning_dist=10):
         dpoints = []
         C0 = []
-        if len(waypoints) % 2 == 0:
-            waypoints.append(waypoints[-1])
-        for start, mid, end in zip(waypoints[:-2][::2], waypoints[1:-1][::2], waypoints[2:][::2]):
+
+        def get_dpoints(start_pt, start_dt, end_dt, step, angle):
+            start_dts = np.linspace(start_dt, end_dt, np.ceil((end_dt - start_dt) / step).astype(int), endpoint=False)
+            dx, dy = start_dts * np.cos(angle), start_dts * np.sin(angle)
+            ddpts = [Node([p[0] + start_pt.x, p[1] + start_pt.y]) for p in np.vstack([dx, dy]).transpose()]
+            for p in ddpts:
+                p.psi = angle
+            return ddpts
+
+        for start, mid, end in zip(waypoints[:-2], waypoints[1:-1], waypoints[2:]):
             dist_1, psi_1 = start.point_to(mid)
             dist_2, psi_2 = mid.point_to(end)
             turning_dist = min(turning_dist, dist_1, dist_2) / 2
             step_size = self.bind_to_range(max(dist_1, dist_2) / 50, 0.2, 1.0)
 
-            # discretize start -> mid
-            start_dists = np.linspace(0, dist_1 - turning_dist,
-                                      np.ceil((dist_1 - turning_dist) / step_size).astype(int),
-                                      endpoint=False)
-            dxs, dys = start_dists * np.cos(psi_1), start_dists * np.sin(psi_1)
-            ddpoints = [Node([p[0] + start.x, p[1] + start.y]) for p in np.vstack([dxs, dys]).transpose()]
-            for p in ddpoints:
-                p.psi = psi_1
-            dpoints.extend(ddpoints)
+            # discretize start/2 -> mid
+            start_dist = 0 if start.equal(waypoints[0]) else dist_1 / 2
+            dpoints.extend(get_dpoints(start, start_dist, dist_1-turning_dist, step_size, psi_1))
 
-            # discretize start -> mid -> end
+            # discretize start/2 -> mid -> end/2
             # turning_radius is defined as positive when psi_1 < psi_2,
             # and the marching direction is along positive x- and y- axis
-            if np.abs(psi_2 - psi_1) > 0.5:
+            if np.abs(psi_2 - psi_1) > 0.2:
                 turning_radius = turning_dist * np.tan((np.pi - (psi_2 - psi_1)) / 2)
                 long_side = turning_dist / np.cos((np.pi - (psi_2 - psi_1)) / 2)
                 curve_origin = [mid.x - long_side * np.cos((np.pi - (psi_2 + psi_1)) / 2),
                                 mid.y + long_side * np.sin((np.pi - (psi_2 + psi_1)) / 2)]
                 C0.append(curve_origin)
-                daa = step_size / turning_radius
+                daa = 0.5 * step_size / turning_radius
                 for aa in np.arange(0, psi_2 - psi_1, daa):
                     dpoint = Node([curve_origin[0] + turning_radius * np.sin(psi_1 + aa),
                                    curve_origin[1] - turning_radius * np.cos(psi_1 + aa)])
                     dpoint.psi = psi_1 + aa
                     dpoints.append(dpoint)
             else:
-                start_mid_dists = np.linspace(dist_1 - turning_dist, dist_1,
-                                              np.ceil(turning_dist / step_size).astype(int),
-                                              endpoint=False)
-                dxs, dys = start_mid_dists * np.cos(psi_1), start_mid_dists * np.sin(psi_1)
-                ddpoints = [Node([p[0] + start.x, p[1] + start.y]) for p in np.vstack([dxs, dys]).transpose()]
-                for p in ddpoints:
-                    p.psi = psi_1
-                dpoints.extend(ddpoints)
-
-                mid_end_dists = np.linspace(0, turning_dist, np.ceil(turning_dist / step_size).astype(int),
-                                            endpoint=False)
-                dxs, dys = mid_end_dists * np.cos(psi_2), mid_end_dists * np.sin(psi_2)
-                ddpoints = [Node([p[0] + mid.x, p[1] + mid.y]) for p in np.vstack([dxs, dys]).transpose()]
-                for p in ddpoints:
-                    p.psi = psi_2
-                dpoints.extend(ddpoints)
+                dpoints.extend(get_dpoints(start, dist_1-turning_dist, dist_1, step_size, psi_1))
+                dpoints.extend(get_dpoints(mid, 0, turning_dist, step_size, psi_2))
 
             # discretize mid -> end
-            end_dists = np.linspace(turning_dist, dist_2, np.ceil((dist_2 - turning_dist) / step_size).astype(int),
-                                    endpoint=False)
-            dxs, dys = end_dists * np.cos(psi_2), end_dists * np.sin(psi_2)
-            ddpoints = [Node([p[0] + mid.x, p[1] + mid.y]) for p in np.vstack([dxs, dys]).transpose()]
-            for p in ddpoints:
-                p.psi = psi_2
+            end_dist = dist_2 if end.equal(waypoints[-1]) else dist_2 / 2
+            ddpoints = get_dpoints(mid, turning_dist, end_dist, step_size, psi_2)
             dpoints.extend(ddpoints)
+
+        end_pos = self.goal_pos
+        end_pos.psi = dpoints[-1].psi
+        dpoints.append(end_pos)
 
         return dpoints, np.array(C0).reshape(-1, 2)
 
@@ -309,19 +272,23 @@ class Pdm4arAgent(Agent):
         axs.scatter(self.C0[:, 0], self.C0[:, 1], marker="+", s=80, c="r")
         axs.scatter([dp.x for dp in self.dpoints], [dp.y for dp in self.dpoints], marker=".", s=2, c="r")
 
+        # plot visited points
+        visited_path = np.array(self.visited_pts).reshape(-1, 2)
+        axs.scatter(visited_path[:, 0], visited_path[:, 1], marker=".", s=2, c="b")
+
         # plot velocities
         x_tail = self.current_state.x
         y_tail = self.current_state.y
         dx = np.abs(self.current_state.vx) * np.cos(self.current_state.psi)
         dy = np.abs(self.current_state.vx) * np.sin(self.current_state.psi)
-        axs.arrow(x_tail + 1, y_tail - .4, dx, dy, width=0.3, length_includes_head=True, color="r")
+        axs.arrow(x_tail, y_tail, dx, dy, width=0.3, length_includes_head=True, color="r")
         # axs.text(x_tail + 1, y_tail - .4, "$V_x$")
 
         v = np.linalg.norm(np.array([self.current_state.vx, self.current_state.vy]))
         drift_angle = np.arctan2(self.current_state.vy, self.current_state.vx)
         dx = v * np.cos(self.current_state.psi + drift_angle)
         dy = v * np.sin(self.current_state.psi + drift_angle)
-        axs.arrow(x_tail + 1, y_tail - .4, dx, dy, width=0.3, length_includes_head=True, color="k")
+        axs.arrow(x_tail, y_tail, dx, dy, width=0.3, length_includes_head=True, color="k")
         # axs.text(x_tail + 1, y_tail - .4, "V")
 
         # dx = np.abs(self.current_state.vy) * np.cos(self.current_state.psi + np.pi / 2)

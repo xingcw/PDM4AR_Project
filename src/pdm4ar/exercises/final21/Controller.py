@@ -55,8 +55,9 @@ class MPCController(object):
 
         # objective setup
         # TODO: tuning Q, R weights
-        mterm = 3 * (x - x_gt) ** 2 + 3 * (y - y_gt) ** 2 + 5 * (psi - psi_gt) ** 2 + 2 * (vy - vy_gt) ** 2
-        lterm = 3 * (x - x_gt) ** 2 + 3 * (y - y_gt) ** 2 + 5 * (psi - psi_gt) ** 2 + 2 * (vy - vy_gt) ** 2
+        drift_angle = np.arctan2(vy, vx)
+        mterm = 3 * (x - x_gt) ** 2 + 3 * (y - y_gt) ** 2 + 2 * (drift_angle - psi_gt) ** 2 + 2 * (vy - vy_gt) ** 2
+        lterm = 3 * (x - x_gt) ** 2 + 3 * (y - y_gt) ** 2 + 2 * (drift_angle - psi_gt) ** 2 + 2 * (vy - vy_gt) ** 2
 
         mpc.set_objective(mterm=mterm, lterm=lterm)
         mpc.set_rterm(
