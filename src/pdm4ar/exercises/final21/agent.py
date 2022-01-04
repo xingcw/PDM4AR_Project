@@ -161,13 +161,15 @@ class Pdm4arAgent(Agent):
         sampling_angles = np.linspace(psi - np.pi / 2, psi + np.pi / 2, 7)
         sampling_order = np.flipud(np.argsort(np.abs(sampling_angles - psi)))
         sampling_angles = sampling_angles[sampling_order]
+        # get the safe boundary of the environment
+        x_range, y_range = self.planner.get_safe_env_bound(offset=3.0)
         for aa in sampling_angles:
             x = candidate.x + radius * np.cos(aa)
             y = candidate.y + radius * np.sin(aa)
             new_candidate = Node([x, y])
             if not self.planner.is_collision(current_pos, new_candidate, offset=2.0) and \
                     not self.sampling_check_collision(new_candidate, radius) \
-                    and new_candidate.is_bound_in_range([2.0, 98.0], [2.0, 98.0]):
+                    and new_candidate.is_bound_in_range(x_range, y_range):
                 return new_candidate
         return None
 
