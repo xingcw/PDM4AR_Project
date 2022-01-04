@@ -1,5 +1,5 @@
 import random
-from typing import Sequence
+from typing import Sequence, List
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
@@ -48,6 +48,7 @@ class Pdm4arAgent(Agent):
         self.t_step = 0
         self.name = None
         self.player = None
+        self.C0 = None
 
     def on_episode_init(self, my_name: PlayerName):
         self.name = my_name
@@ -75,12 +76,13 @@ class Pdm4arAgent(Agent):
                 print(f"[replanning] cannot find available number of stops!")
                 self.replan(self.start_pos, self.goal_pos)
                 self.stops = self.get_stops()
-            self.dpoints = self.discretize(self.stops)
+            self.dpoints, self.C0 = self.fit_turning_curve(self.stops)
 
         self.t_step += 1
         dpoints = self.dpoints[self.t_step:]
         if len(dpoints) < 30:
-            dpoints.append(dpoints[-1])
+            self.dpoints.append(self.dpoints[-1])
+            dpoints.append(self.dpoints[-1])
         try:
             controller = MPCController(dpoints, self.sg, self.current_state.as_ndarray())
             commands = controller.mpc_command(self.current_state.as_ndarray(), dpoints).squeeze()
@@ -90,7 +92,7 @@ class Pdm4arAgent(Agent):
         print(commands)
         print(self.current_state)
         if self.debug:
-            self.plot_state()
+            self.plot_state(self.C0)
         return commands
 
     def get_stops(self, max_num_steps=8):
@@ -197,19 +199,20 @@ class Pdm4arAgent(Agent):
             dist, angle = waypoint.point_to(waypoint.child)
             waypoint.psi = angle
 
-    def discretize(self, waypoints: Sequence[Node], turning_dist=10):
+    def discretize(self, waypoints: List[Node], turning_dist=10):
         dpoints = []
         for start, end in zip(waypoints[:-1], waypoints[1:]):
             dist, aa = start.point_to(end)
             # using adaptive step size
-            step_size = self.bind_to_range(dist/50, 0.2, 1.0)
+            step_size = self.bind_to_range(dist / 50, 0.2, 1.0)
             dists = np.linspace(0, dist, np.ceil(dist / step_size).astype(int), endpoint=False)
             if dist > turning_dist:
-                start_dists = np.linspace(0, turning_dist/2, np.ceil(turning_dist / (2*step_size)).astype(int),
+                start_dists = np.linspace(0, turning_dist / 2, np.ceil(turning_dist / (2 * step_size)).astype(int),
                                           endpoint=False)
-                dists = np.linspace(turning_dist/2, dist - turning_dist/2, np.ceil(dist / step_size).astype(int),
+                dists = np.linspace(turning_dist / 2, dist - turning_dist / 2, np.ceil(dist / step_size).astype(int),
                                     endpoint=False)
-                turning_dists = np.linspace(dist - turning_dist/2, dist, np.ceil(turning_dist / step_size).astype(int),
+                turning_dists = np.linspace(dist - turning_dist / 2, dist,
+                                            np.ceil(turning_dist / step_size).astype(int),
                                             endpoint=False)
                 dists = np.hstack([start_dists, dists, turning_dists])
             dxs, dys = dists * np.cos(aa), dists * np.sin(aa)
@@ -222,7 +225,72 @@ class Pdm4arAgent(Agent):
         dpoints.append(end_pos)
         return dpoints
 
-    def plot_state(self):
+    def fit_turning_curve(self, waypoints: List[Node], turning_dist=10):
+        dpoints = []
+        C0 = []
+        if len(waypoints) % 2 == 0:
+            waypoints.append(waypoints[-1])
+        for start, mid, end in zip(waypoints[:-2][::2], waypoints[1:-1][::2], waypoints[2:][::2]):
+            dist_1, psi_1 = start.point_to(mid)
+            dist_2, psi_2 = mid.point_to(end)
+            turning_dist = min(turning_dist, dist_1, dist_2) / 2
+            step_size = self.bind_to_range(max(dist_1, dist_2) / 50, 0.2, 1.0)
+
+            # discretize start -> mid
+            start_dists = np.linspace(0, dist_1 - turning_dist,
+                                      np.ceil((dist_1 - turning_dist) / step_size).astype(int),
+                                      endpoint=False)
+            dxs, dys = start_dists * np.cos(psi_1), start_dists * np.sin(psi_1)
+            ddpoints = [Node([p[0] + start.x, p[1] + start.y]) for p in np.vstack([dxs, dys]).transpose()]
+            for p in ddpoints:
+                p.psi = psi_1
+            dpoints.extend(ddpoints)
+
+            # discretize start -> mid -> end
+            # turning_radius is defined as positive when psi_1 < psi_2,
+            # and the marching direction is along positive x- and y- axis
+            if np.abs(psi_2 - psi_1) > 0.5:
+                turning_radius = turning_dist * np.tan((np.pi - (psi_2 - psi_1)) / 2)
+                long_side = turning_dist / np.cos((np.pi - (psi_2 - psi_1)) / 2)
+                curve_origin = [mid.x - long_side * np.cos((np.pi - (psi_2 + psi_1)) / 2),
+                                mid.y + long_side * np.sin((np.pi - (psi_2 + psi_1)) / 2)]
+                C0.append(curve_origin)
+                daa = step_size / turning_radius
+                for aa in np.arange(0, psi_2 - psi_1, daa):
+                    dpoint = Node([curve_origin[0] + turning_radius * np.sin(psi_1 + aa),
+                                   curve_origin[1] - turning_radius * np.cos(psi_1 + aa)])
+                    dpoint.psi = psi_1 + aa
+                    dpoints.append(dpoint)
+            else:
+                start_mid_dists = np.linspace(dist_1 - turning_dist, dist_1,
+                                              np.ceil(turning_dist / step_size).astype(int),
+                                              endpoint=False)
+                dxs, dys = start_mid_dists * np.cos(psi_1), start_mid_dists * np.sin(psi_1)
+                ddpoints = [Node([p[0] + start.x, p[1] + start.y]) for p in np.vstack([dxs, dys]).transpose()]
+                for p in ddpoints:
+                    p.psi = psi_1
+                dpoints.extend(ddpoints)
+
+                mid_end_dists = np.linspace(0, turning_dist, np.ceil(turning_dist / step_size).astype(int),
+                                            endpoint=False)
+                dxs, dys = mid_end_dists * np.cos(psi_2), mid_end_dists * np.sin(psi_2)
+                ddpoints = [Node([p[0] + mid.x, p[1] + mid.y]) for p in np.vstack([dxs, dys]).transpose()]
+                for p in ddpoints:
+                    p.psi = psi_2
+                dpoints.extend(ddpoints)
+
+            # discretize mid -> end
+            end_dists = np.linspace(turning_dist, dist_2, np.ceil((dist_2 - turning_dist) / step_size).astype(int),
+                                    endpoint=False)
+            dxs, dys = end_dists * np.cos(psi_2), end_dists * np.sin(psi_2)
+            ddpoints = [Node([p[0] + mid.x, p[1] + mid.y]) for p in np.vstack([dxs, dys]).transpose()]
+            for p in ddpoints:
+                p.psi = psi_2
+            dpoints.extend(ddpoints)
+
+        return dpoints, np.array(C0).reshape(-1, 2)
+
+    def plot_state(self, C0):
         # axs = plt.gca()
         _, axs = plt.subplots()
         shapely_viz = ShapelyViz(axs)
@@ -240,7 +308,11 @@ class Pdm4arAgent(Agent):
             axs.plot(*safe_s_obstacle.xy)
 
         # plot planned path
-        axs.plot([x[0] for x in self.planner.path], [x[1] for x in self.planner.path], '-k', linewidth=2)
+        # axs.plot([x[0] for x in self.planner.path], [x[1] for x in self.planner.path], '-k', linewidth=2)
+
+        # plot discretized path
+        axs.scatter(C0[:, 0], C0[:, 1], marker="+", s=80, c="r")
+        axs.scatter([dp.x for dp in self.dpoints], [dp.y for dp in self.dpoints], marker=".", s=2, c="r")
 
         # plot velocities
         x_tail = self.current_state.x

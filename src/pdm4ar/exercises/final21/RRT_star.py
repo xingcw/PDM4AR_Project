@@ -90,8 +90,8 @@ class RrtStar:
                                  3.0: self.get_safe_obstacles(3.0)}
 
     def get_safe_env_bound(self, offset=3.0):
-        x_range = [self.x_range[0] - offset, self.x_range[1] + offset]
-        y_range = [self.y_range[0] - offset, self.y_range[1] + offset]
+        x_range = [self.x_range[0] + offset, self.x_range[1] - offset]
+        y_range = [self.y_range[0] + offset, self.y_range[1] - offset]
         return x_range, y_range
 
     def get_safe_obstacles(self, offset=2.0):
