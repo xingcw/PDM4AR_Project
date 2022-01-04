@@ -47,15 +47,15 @@ class MPCController(object):
             'n_horizon': 20,
             't_step': 0.1,
             'n_robust': 1,
-            'store_full_solution': True,
+            'store_full_solution': False,
         }
         mpc.set_param(**setup_mpc)
         self.n_horizon = setup_mpc['n_horizon']
 
         # objective setup
         # TODO: tuning Q, R weights
-        mterm = (x - x_gt) ** 2 + (y - y_gt) ** 2 + 3 * (psi - psi_gt) ** 2
-        lterm = (x - x_gt) ** 2 + (y - y_gt) ** 2 + 3 * (psi - psi_gt) ** 2
+        mterm = (x - x_gt) ** 2 + (y - y_gt) ** 2 + 5 * (psi - psi_gt) ** 2
+        lterm = (x - x_gt) ** 2 + (y - y_gt) ** 2 + 5 * (psi - psi_gt) ** 2
 
         mpc.set_objective(mterm=mterm, lterm=lterm)
         mpc.set_rterm(

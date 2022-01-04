@@ -1,3 +1,4 @@
+import random
 from typing import Sequence
 import numpy as np
 import matplotlib
@@ -36,12 +37,16 @@ class Pdm4arAgent(Agent):
         self.planner = None
         self.current_state = None
         self.current_goal = None
+        self.start_pos = None
+        self.goal_pos = None
         self.waypoints = []
         self.dpoints = []
+        self.stops = []
         self.drift_angle = 0
         # TODO: get rid of time stamp
         self.t_step = 0
         self.name = None
+        self.player = None
 
     def on_episode_init(self, my_name: PlayerName):
         self.name = my_name
@@ -57,17 +62,20 @@ class Pdm4arAgent(Agent):
         """
 
         # todo implement here
-        self.current_state = sim_obs.players[self.name].state
-        start_pos = Node.from_state(self.current_state)
-        goal_pos = Node([self.goal.goal.centroid.x, self.goal.goal.centroid.y])
+        self.player = sim_obs.players[self.name]
+        self.current_state = self.player.state
         self.drift_angle = np.arctan2(self.current_state.vy, self.current_state.vx)
         if self.planner is None:
-            self.replan(start_pos, goal_pos)
-            self.dpoints = self.discretize()
-        # self.current_goal = self.waypoints[0]
-        # if self.reach_goal():
-        #     self.update_waypoints()
-        # self.replan(start_pos, goal_pos)
+            self.start_pos = Node.from_state(self.current_state)
+            self.goal_pos = Node([self.goal.goal.centroid.x, self.goal.goal.centroid.y])
+            self.replan(self.start_pos, self.goal_pos)
+            self.stops = self.get_stops()
+            while self.stops is None:
+                print(f"[replanning] cannot find available number of stops!")
+                self.replan(self.start_pos, self.goal_pos)
+                self.stops = self.get_stops()
+            self.dpoints = self.discretize(self.stops)
+
         self.t_step += 1
         dpoints = self.dpoints[self.t_step:]
         controller = MPCController(dpoints, self.sg, self.current_state.as_ndarray())
@@ -77,19 +85,87 @@ class Pdm4arAgent(Agent):
         self.plot_state()
         return commands
 
+    def get_stops(self, max_num_steps=8):
+        start_point = Node.from_state(self.current_state)
+        end_point = start_point
+        origin_waypoints = self.waypoints
+        stops = [start_point]
+
+        while not end_point.equal(self.goal_pos) and len(stops) < max_num_steps:
+            end_point = self.get_furthest_no_collision_waypoint(start_point)
+            if end_point is None:
+                return None
+            stops.append(end_point)
+            start_point = end_point
+
+        self.waypoints = origin_waypoints
+        return stops if end_point.equal(self.goal_pos) else None
+
+    def get_furthest_no_collision_waypoint(self, current_pos=None):
+        if current_pos is None:
+            current_pos = Node.from_state(self.current_state)
+        if not self.planner.is_collision(current_pos, self.planner.s_goal, offset=2.0):
+            return self.waypoints[-1]
+        collision = np.array(
+            [self.planner.is_collision(current_pos, waypoint, offset=2.0) for waypoint in self.waypoints])
+        state = np.array([current_pos.x, current_pos.y])
+        waypoints = np.array([[waypoint.x, waypoint.y] for waypoint in self.waypoints])
+        distance = np.linalg.norm(state - waypoints, axis=1)
+        no_collision_dist = np.multiply(distance, ~collision)
+        idx = np.argmax(no_collision_dist)
+        candidate_goal = self.waypoints[idx]
+
+        if self.current_goal is not None and candidate_goal.equal(self.current_goal):
+            return None
+
+        if self.sampling_check_collision(candidate_goal):
+            new_candidate = self.resample_goal(candidate_goal)
+            if new_candidate is None:
+                if not self.sampling_check_collision(candidate_goal.parent) and \
+                        not current_pos.equal(candidate_goal.parent):
+                    print(f"[resample next goal] sampling not available, try its parent...")
+                    candidate_goal = candidate_goal.parent
+                    idx -= 1
+                else:
+                    return None
+            else:
+                print(f"[resample next goal] sampling... \n")
+                candidate_goal = new_candidate
+
+        self.waypoints = self.waypoints[idx:]
+        return candidate_goal
+
+    def sampling_check_collision(self, waypoint: Node, radius=5.0):
+        if waypoint.equal(self.goal_pos):
+            return False
+        sampling_angles = np.linspace(-np.pi, np.pi, 12)
+        for aa in sampling_angles:
+            x = waypoint.x + radius * np.cos(aa)
+            y = waypoint.y + radius * np.sin(aa)
+            check_point = Node([x, y])
+            if self.planner.is_collision(waypoint, check_point, offset=2.0):
+                return True
+        return False
+
+    def resample_goal(self, candidate: Node, radius=5.0):
+        current_pos = Node.from_state(self.current_state)
+        dist, psi = current_pos.point_to(candidate)
+        sampling_angles = np.linspace(psi - np.pi / 2, psi + np.pi / 2, 7)
+        sampling_order = np.flipud(np.argsort(np.abs(sampling_angles - psi)))
+        sampling_angles = sampling_angles[sampling_order]
+        for aa in sampling_angles:
+            x = candidate.x + radius * np.cos(aa)
+            y = candidate.y + radius * np.sin(aa)
+            new_candidate = Node([x, y])
+            if not self.planner.is_collision(current_pos, new_candidate, offset=2.0) and \
+                    not self.sampling_check_collision(new_candidate, radius) \
+                    and new_candidate.is_bound_in_range([2.0, 98.0], [2.0, 98.0]):
+                return new_candidate
+        return None
+
     def get_safe_distance(self):
         v = np.linalg.norm([self.current_state.vx, self.current_state.vy])
         return v ** 2 / (2 * A_MAX)
-
-    def reach_goal(self, thresh=3.0):
-        if np.abs(self.current_state.x - self.current_goal.x) < thresh and \
-                np.abs(self.current_state.y - self.current_goal.y) < thresh:
-            return True
-        else:
-            return False
-
-    def update_waypoints(self):
-        self.waypoints.remove(self.current_goal)
 
     def replan(self, start, end):
         self.planner = RrtStar(start, end, self.static_obstacles, safe_offset=3.0)
@@ -111,17 +187,20 @@ class Pdm4arAgent(Agent):
             dist, angle = waypoint.point_to(waypoint.child)
             waypoint.psi = angle
 
-    def discretize(self, horizon=20):
+    def discretize(self, waypoints: Sequence[Node], step_size=1.0):
         # TODO: resolve the discretization around the terminal state
         dpoints = []
-        for start, end in zip(self.waypoints[:-1], self.waypoints[1:]):
+        for start, end in zip(waypoints[:-1], waypoints[1:]):
             dist, aa = start.point_to(end)
-            dists = np.linspace(0, dist, horizon, endpoint=False)
+            dists = np.linspace(0, dist, np.ceil(dist/step_size).astype(int), endpoint=False)
             dxs, dys = dists * np.cos(aa), dists * np.sin(aa)
             ddpoints = [Node([p[0] + start.x, p[1] + start.y]) for p in np.vstack([dxs, dys]).transpose()]
             for p in ddpoints:
                 p.psi = aa
             dpoints.extend(ddpoints)
+        end_pos = self.goal_pos
+        end_pos.psi = dpoints[-1]
+        dpoints.extend([end_pos]*20)
         return dpoints
 
     def plot_state(self):
@@ -179,7 +258,11 @@ class Pdm4arAgent(Agent):
         axs.add_collection(scan_lanes)
 
         # plot current goal
-        # axs.scatter(self.current_goal.x, self.current_goal.y, marker="*", s=80, c="r")
+        stops = np.array([[s.x, s.y] for s in self.stops])
+        axs.scatter(stops[:, 0], stops[:, 1], marker="*", s=80, c="r")
+
+        # plot players
+        axs.plot(*self.player.occupancy.boundary.xy)
 
         # TODO: plot the open-loop and closed-loop trajectory
 
