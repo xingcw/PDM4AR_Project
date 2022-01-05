@@ -7,7 +7,7 @@ from pdm4ar.exercises.final21.RRT_star import Node
 
 
 class MPCController(object):
-    def __init__(self, path: Sequence[Node], sg: SpacecraftGeometry, x0: SpacecraftState):
+    def __init__(self, path: Sequence[Node], sg: SpacecraftGeometry, x0: SpacecraftState, horizon: int):
         # either 'discrete' or 'continuous'
         model_type = 'continuous'
         model = do_mpc.model.Model(model_type)
@@ -29,6 +29,7 @@ class MPCController(object):
         y_gt = model.set_variable(var_type='_tvp', var_name='y_gt', shape=(1, 1))
         vy_gt = model.set_variable(var_type='_tvp', var_name='vy_gt', shape=(1, 1))
         psi_gt = model.set_variable(var_type='_tvp', var_name='psi_gt', shape=(1, 1))
+        dpsi_gt = model.set_variable(var_type='_tvp', var_name='dpsi_gt', shape=(1, 1))
 
         # system dynamics
         model.set_rhs('x', vx * np.cos(psi) - vy * np.sin(psi))
@@ -45,7 +46,7 @@ class MPCController(object):
         # setup MPC controller
         mpc = do_mpc.controller.MPC(model)
         setup_mpc = {
-            'n_horizon': 30,
+            'n_horizon': horizon,
             't_step': 0.1,
             'n_robust': 0,
             'store_full_solution': False,
@@ -55,9 +56,8 @@ class MPCController(object):
 
         # objective setup
         # TODO: tuning Q, R weights
-        drift_angle = np.arctan2(vy, vx)
-        mterm = 3 * (x - x_gt) ** 2 + 3 * (y - y_gt) ** 2 + 2 * (drift_angle - psi_gt) ** 2 + 2 * (vy - vy_gt) ** 2
-        lterm = 3 * (x - x_gt) ** 2 + 3 * (y - y_gt) ** 2 + 2 * (drift_angle - psi_gt) ** 2 + 2 * (vy - vy_gt) ** 2
+        mterm = 5 * (x - x_gt) ** 2 + 5 * (y - y_gt) ** 2 + 3 * (psi - psi_gt)**2 + 3 * (vy - vy_gt) ** 2
+        lterm = 5 * (x - x_gt) ** 2 + 5 * (y - y_gt) ** 2 + 3 * (psi - psi_gt)**2 + 3 * (vy - vy_gt) ** 2
 
         mpc.set_objective(mterm=mterm, lterm=lterm)
         mpc.set_rterm(
@@ -103,6 +103,7 @@ class MPCController(object):
                 tvp_template['_tvp', k, 'y_gt'] = plan_sequence[k].y
                 tvp_template['_tvp', k, 'psi_gt'] = plan_sequence[k].psi
                 tvp_template['_tvp', k, 'vy_gt'] = 0
+                tvp_template['_tvp', k, 'dpsi_gt'] = 0
             return tvp_template
 
         self.mpc.set_tvp_fun(tvp_fun)

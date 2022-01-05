@@ -80,11 +80,12 @@ class Pdm4arAgent(Agent):
 
         self.t_step += 1
         dpoints = self.dpoints[self.t_step:]
-        if len(dpoints) < 30:
+        horizon = 40
+        if len(dpoints) < horizon:
             self.dpoints.append(self.dpoints[-1])
             dpoints.append(self.dpoints[-1])
         try:
-            controller = MPCController(dpoints, self.sg, self.current_state.as_ndarray())
+            controller = MPCController(dpoints, self.sg, self.current_state.as_ndarray(), horizon)
             commands = controller.mpc_command(self.current_state.as_ndarray(), dpoints).squeeze()
             commands = SpacecraftCommands(acc_left=commands[0], acc_right=commands[1])
         except:
@@ -196,7 +197,7 @@ class Pdm4arAgent(Agent):
             dist, angle = waypoint.point_to(waypoint.child)
             waypoint.psi = angle
 
-    def fit_turning_curve(self, waypoints: List[Node], turning_dist=10):
+    def fit_turning_curve(self, waypoints: List[Node], turning_dist=20):
         dpoints = []
         C0 = []
 
@@ -227,7 +228,7 @@ class Pdm4arAgent(Agent):
                 curve_origin = [mid.x - long_side * np.cos((np.pi - (psi_2 + psi_1)) / 2),
                                 mid.y + long_side * np.sin((np.pi - (psi_2 + psi_1)) / 2)]
                 C0.append(curve_origin)
-                daa = 0.5 * step_size / turning_radius
+                daa = 0.3 * step_size / turning_radius
                 for aa in np.arange(0, psi_2 - psi_1, daa):
                     dpoint = Node([curve_origin[0] + turning_radius * np.sin(psi_1 + aa),
                                    curve_origin[1] - turning_radius * np.cos(psi_1 + aa)])
