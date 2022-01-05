@@ -34,7 +34,7 @@ class Pdm4arAgent(Agent):
         self.static_obstacles = static_obstacles
         self.sg = sg
         self.sp = sp
-        self.debug = True
+        self.debug = False
         self.planner = None
         self.current_state = None
         self.start_pos = None
