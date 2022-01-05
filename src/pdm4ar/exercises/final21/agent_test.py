@@ -35,7 +35,7 @@ if __name__ == '__main__':
     # rrt_star.planning()
 
     '''For Kiwan testing, dubins RRT star algo'''
-    rrt = RRT(dg_scenario)
+    rrt = RRT([s_obstacle for s_obstacle in dg_scenario.static_obstacles.values()])
 
     # We select two random points in the free space as a start and final node
     start = (x0.x, x0.y, math.pi/2)
@@ -45,5 +45,6 @@ if __name__ == '__main__':
     rrt.set_start(start)
 
     # We run 100 iterations of growth
-    rrt.run(end, nb_iteration=2000)
+    rrt.run(end, nb_iteration=100)
+    x, y, psi = rrt.get_final_path()
     rrt.plot(file_name='kiwan', nodes=True)
