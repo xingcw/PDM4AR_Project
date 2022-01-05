@@ -97,6 +97,11 @@ class Pdm4arAgent(Agent):
         return commands
 
     def get_stops(self, max_num_steps=8):
+        """
+        Get the simplified path with minimum number of stops.
+        :param max_num_steps: max number of stops accepted, otherwise replan the path.
+        :return: list of stops if available, else None.
+        """
         start_point = Node.from_state(self.current_state)
         end_point = start_point
         origin_waypoints = self.waypoints
@@ -113,6 +118,14 @@ class Pdm4arAgent(Agent):
         return stops if end_point.equal(self.goal_pos) else None
 
     def get_furthest_no_collision_waypoint(self, current_pos=None, offset=3.0):
+        """
+        Used for getting the simplified path.
+        Get the furthest node/waypoint from the current node/waypoint without collision with the environment.
+        :param current_pos: the current node.
+        :param offset: the safe offset defined for collision checks in this function. (nothing to do with
+         the safe offset defined for the planner)
+        :return:
+        """
         if current_pos is None:
             current_pos = Node.from_state(self.current_state)
         if not self.planner.is_collision(current_pos, self.planner.s_goal, offset):
@@ -144,6 +157,13 @@ class Pdm4arAgent(Agent):
         return candidate_goal
 
     def sampling_check_collision(self, waypoint: Node, offset=3.0, radius=5.0):
+        """
+        Check if a node/waypoint is safe enough by sampling points around it and check collisions.
+        :param waypoint: the waypoint/node to be checked.
+        :param offset: the safe offset defined for the collision checks.
+        :param radius: the radius used for circle sampling.
+        :return: True if not safe, else False.
+        """
         if waypoint.equal(self.goal_pos):
             return False
         sampling_angles = np.linspace(-np.pi, np.pi, 12)
@@ -156,6 +176,13 @@ class Pdm4arAgent(Agent):
         return False
 
     def resample_goal(self, candidate: Node, offset=3.0, radius=5.0):
+        """
+        Resample a new goal around the current goal which is not safe enough.
+        :param candidate: target goal to be resampled.
+        :param offset: safe offset for collision checks.
+        :param radius: circle sampling radius.
+        :return:
+        """
         current_pos = Node.from_state(self.current_state)
         dist, psi = current_pos.point_to(candidate)
         sampling_angles = np.linspace(psi - np.pi / 2, psi + np.pi / 2, 7)

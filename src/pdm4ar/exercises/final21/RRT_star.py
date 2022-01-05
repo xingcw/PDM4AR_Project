@@ -96,10 +96,6 @@ class RrtStar:
 
     def get_safe_obstacles(self, offset=2.0):
         safe_s_obstacles = []
-        # minx, maxx = self.x_range[0] + offset, self.x_range[1] - offset
-        # miny, maxy = self.y_range[0] + offset, self.y_range[1] - offset
-        # safe_boundary = LineString([(minx, miny), (minx, maxy), (maxx, maxy), (maxx, miny), (minx, miny)])
-        # safe_s_obstacles.append(safe_boundary)
         for s_obstacle in self.static_obstacles[1:]:
             safe_boundary = s_obstacle.shape.buffer(offset, resolution=16, join_style=2, mitre_limit=1).exterior
             safe_s_obstacles.append(safe_boundary)
