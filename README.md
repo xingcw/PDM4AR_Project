@@ -4,3 +4,5 @@
 This repository contains the programming exercises for the course Planning and Decision Making for Autonomous Robots.
 
 See the documentation in the `docs/` folder, the content is also available at [this link](https://idsc-frazzoli.github.io/PDM4AR-exercises/).
+
+source: https://github.com/arthur960304/model-predictive-control/blob/5fa0b68f74c36e2c27b572918c5f90d3ee88ddc2/src/reference_path.py
