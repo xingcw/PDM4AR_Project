@@ -6,7 +6,7 @@ RRT_star 2D
 import math
 import numpy as np
 import collections
-from typing import Sequence
+from typing import Sequence, Optional, List
 from dg_commons.sim.models.obstacles import StaticObstacle
 from dg_commons.sim.models.spacecraft import SpacecraftState
 from shapely.geometry import LineString, Polygon
@@ -66,7 +66,7 @@ class Node:
 
 
 class RrtStar:
-    def __init__(self, x_start, x_goal, static_obstacles: Sequence[StaticObstacle], visualize=False,
+    def __init__(self, x_start, x_goal, static_obstacles: Sequence[StaticObstacle], dynamic_obstacles=None, visualize=False,
                  step_len=10, goal_sample_rate=0.1, search_radius=20, iter_max=2000, safe_offset=3.0, safe_boarder=3.0):
         self.s_start = x_start
         self.s_goal = x_goal
@@ -79,15 +79,22 @@ class RrtStar:
         self.visualize = visualize
         self.path = []
         self.static_obstacles = static_obstacles
+        self.dynamic_obstacles = dynamic_obstacles
         self.offset = safe_offset
         self.safe_boarder = safe_boarder
         # environment boarder
         env = self.static_obstacles[0].shape
         self.x_range = [env.bounds[0], env.bounds[2]]
         self.y_range = [env.bounds[1], env.bounds[3]]
-        self.safe_s_obstacles = {0.0: self.static_obstacles,
-                                 2.0: self.get_safe_obstacles(2.0),
-                                 3.0: self.get_safe_obstacles(3.0)}
+        self.safe_obstacles = {0.0: self.get_safe_obstacles(0.0),
+                               2.0: self.get_safe_obstacles(2.0),
+                               3.0: self.get_safe_obstacles(3.0)}
+
+    def update_npc(self, obstacle):
+        self.dynamic_obstacles = obstacle if isinstance(obstacle, list) else [obstacle]
+        self.safe_obstacles = {0.0: self.get_safe_obstacles(0.0),
+                               2.0: self.get_safe_obstacles(2.0),
+                               3.0: self.get_safe_obstacles(3.0)}
 
     def get_safe_env_bound(self, offset=3.0):
         x_range = [self.x_range[0] + offset, self.x_range[1] - offset]
@@ -95,27 +102,37 @@ class RrtStar:
         return x_range, y_range
 
     def get_safe_obstacles(self, offset=2.0):
-        safe_s_obstacles = []
-        for s_obstacle in self.static_obstacles[1:]:
-            safe_boundary = s_obstacle.shape.buffer(offset, resolution=16, join_style=2, mitre_limit=1).exterior
-            safe_s_obstacles.append(safe_boundary)
-        return safe_s_obstacles
+        safe_obstacles = []
+        if offset:
+            for s_obstacle in self.static_obstacles[1:]:
+                safe_boundary = s_obstacle.shape.buffer(offset, resolution=16, join_style=2, mitre_limit=1).exterior
+                safe_obstacles.append(safe_boundary)
+            if self.dynamic_obstacles is not None:
+                for d_obs in self.dynamic_obstacles:
+                    safe_boundary = d_obs.buffer(offset, resolution=16, join_style=2, mitre_limit=1).exterior
+                    safe_obstacles.append(safe_boundary)
+        else:
+            safe_obstacles = self.static_obstacles[1:]
+            if self.dynamic_obstacles is not None:
+                for d_obs in self.dynamic_obstacles:
+                    safe_obstacles.append(d_obs)
+        return safe_obstacles
 
     def is_collision(self, node_near, node_new, offset=None):
         if offset is not None:
-            if offset not in self.safe_s_obstacles.keys():
-                self.safe_s_obstacles.update({offset: self.get_safe_obstacles(offset)})
+            if offset not in self.safe_obstacles.keys():
+                self.safe_obstacles.update({offset: self.get_safe_obstacles(offset)})
         else:
-            if self.offset not in self.safe_s_obstacles.keys():
-                self.safe_s_obstacles.update({self.offset: self.get_safe_obstacles(self.offset)})
+            if self.offset not in self.safe_obstacles.keys():
+                self.safe_obstacles.update({self.offset: self.get_safe_obstacles(self.offset)})
             offset = self.offset
         if offset:
-            for s_obstacle in self.safe_s_obstacles[offset]:
+            for s_obstacle in self.safe_obstacles[offset]:
                 path = LineString([(node_near.x, node_near.y), (node_new.x, node_new.y)])
                 if path.intersects(s_obstacle):
                     return True
         else:
-            for s_obstacle in self.safe_s_obstacles[offset]:
+            for s_obstacle in self.safe_obstacles[offset]:
                 path = LineString([(node_near.x, node_near.y), (node_new.x, node_new.y)])
                 if path.intersects(s_obstacle.shape.convex_hull.exterior):
                     return True

@@ -1,9 +1,9 @@
-import random
 from typing import Sequence, List
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.collections as mc
+from shapely.geometry import LineString
 from dg_commons.maps.shapely_viz import ShapelyViz
 from dg_commons.sim.simulator_visualisation import ZOrders
 from dg_commons import PlayerName
@@ -47,6 +47,9 @@ class Pdm4arAgent(Agent):
         self.t_step = 0
         self.name = None
         self.player = None
+        self.npc = []
+        self.dvos = None
+        self.dynamic = False
         # TODO: remove later
         self.C0 = None
 
@@ -63,24 +66,37 @@ class Pdm4arAgent(Agent):
         :return:
         """
 
-        # todo implement here
+        if len(sim_obs.players.keys()) > 1:
+            self.dynamic = True
+            all_names = list(sim_obs.players.keys())
+            all_names.remove(self.name)
+            self.npc = []
+            for npc in all_names:
+                self.npc.append(sim_obs.players[npc])
+            self.dvos = self.get_dynamic_velocity_obstacle()
+
         self.player = sim_obs.players[self.name]
         self.current_state = self.player.state
         self.visited_pts.append([self.current_state.x, self.current_state.y])
-        if self.planner is None:
+
+        if self.planner is None or self.is_path_in_collision():
             self.start_pos = Node.from_state(self.current_state)
             self.goal_pos = Node([self.goal.goal.centroid.x, self.goal.goal.centroid.y])
             self.replan(self.start_pos, self.goal_pos)
             self.stops = self.get_stops()
             while self.stops is None:
-                print(f"[replanning] cannot find available number of stops!")
+                print(f"[replanning] cannot find available stops!")
                 self.replan(self.start_pos, self.goal_pos)
                 self.stops = self.get_stops()
             self.dpoints, self.C0 = self.fit_turning_curve(self.stops)
+        elif self.dynamic:
+            self.planner.update_npc(self.dvos)
 
         self.t_step += 1
         dpoints = self.dpoints[self.t_step:]
+
         horizon = 40
+        # add terminate state to the end of the path when the horizon is not reached
         if len(dpoints) < horizon:
             self.dpoints.append(self.dpoints[-1])
             dpoints.append(self.dpoints[-1])
@@ -90,16 +106,54 @@ class Pdm4arAgent(Agent):
             commands = SpacecraftCommands(acc_left=commands[0], acc_right=commands[1])
         except:
             commands = SpacecraftCommands(acc_left=0, acc_right=0)
+
+        print("-"*20, f"Command at Time Step {self.t_step}", "-"*20)
         print(commands)
+        print("-"*20, "Current State", "-"*20)
         print(self.current_state)
+
         if self.debug:
             self.plot_state()
         return commands
 
-    def get_stops(self, max_num_steps=8):
+    def get_dynamic_velocity_obstacle(self):
+        """
+        Create a new obstacle for collision checks, which uses the velocity as the length,
+        and the circumscribed circle as the base object.
+        refer to shapely for more information: https://shapely.readthedocs.io/en/stable/manual.html#polygons
+        :return: dynamic obstacles
+        """
+        dvos = []
+        for npc in self.npc:
+            minx, miny, maxx, maxy = npc.occupancy.bounds
+            radius = np.linalg.norm([maxx-minx, maxy-miny]) / 2
+            v = np.linalg.norm([npc.state.vx, npc.state.vy])
+            aa = np.arctan2(npc.state.vy, npc.state.vx) + npc.state.psi
+            dx, dy = v * np.cos(aa), v * np.sin(aa)
+            start = [npc.state.x, npc.state.y]
+            end = [2*dx + npc.state.x, 2*dy + npc.state.y]
+            path = LineString([start, end])
+            obs = path.buffer(distance=radius)
+            dvos.append(obs)
+        return dvos
+
+    def is_path_in_collision(self, offset=3.0):
+        """
+        Get True if the simplified path is in collision with the dynamic obstacles.
+        todo: remove the passed stops along the path
+        :param offset: for collision checks
+        :return:
+        """
+        if self.planner is None:
+            return False
+        for start, end in zip(self.stops[:-1], self.stops[1:]):
+            if self.planner.is_collision(start, end, offset):
+                return True
+        return False
+
+    def get_stops(self):
         """
         Get the simplified path with minimum number of stops.
-        :param max_num_steps: max number of stops accepted, otherwise replan the path.
         :return: list of stops if available, else None.
         """
         start_point = Node.from_state(self.current_state)
@@ -107,7 +161,7 @@ class Pdm4arAgent(Agent):
         origin_waypoints = self.waypoints
         stops = [start_point]
 
-        while not end_point.equal(self.goal_pos) and len(stops) < max_num_steps:
+        while not end_point.equal(self.goal_pos):
             end_point = self.get_furthest_no_collision_waypoint(start_point)
             if end_point is None:
                 return None
@@ -117,10 +171,11 @@ class Pdm4arAgent(Agent):
         self.waypoints = origin_waypoints
         return stops if end_point.equal(self.goal_pos) else None
 
-    def get_furthest_no_collision_waypoint(self, current_pos=None, offset=3.0):
+    def get_furthest_no_collision_waypoint(self, current_pos=None, offset=3.0, search_radius=30):
         """
         Used for getting the simplified path.
         Get the furthest node/waypoint from the current node/waypoint without collision with the environment.
+        :param search_radius: max distance from current pose for searching waypoints.
         :param current_pos: the current node.
         :param offset: the safe offset defined for collision checks in this function. (nothing to do with
          the safe offset defined for the planner)
@@ -136,15 +191,20 @@ class Pdm4arAgent(Agent):
         waypoints = np.array([[waypoint.x, waypoint.y] for waypoint in self.waypoints])
         distance = np.linalg.norm(state - waypoints, axis=1)
         no_collision_dist = np.multiply(distance, ~collision)
-        idx = np.argmax(no_collision_dist)
-        candidate_goal = self.waypoints[idx]
+        valid_dist = no_collision_dist <= search_radius
+        valid_no_collision_dist = np.multiply(no_collision_dist, valid_dist)
+        idx = np.argmax(valid_no_collision_dist)
 
+        # if the node cannot find a neighbor, skip it
+        candidate_goal = self.waypoints[1] if idx == 0 else self.waypoints[idx]
+
+        # check if the neighbor is safe enough, resample around it if not
         if self.sampling_check_collision(candidate_goal, offset):
-            new_candidate = self.resample_goal(candidate_goal, offset)
+            new_candidate = self.resample_goal(candidate_goal, current_pos, offset)
             if new_candidate is None:
                 if not self.sampling_check_collision(candidate_goal.parent, offset) and \
                         not current_pos.equal(candidate_goal.parent):
-                    print(f"[resample next goal] sampling not available, try its parent...")
+                    print(f"[resample next goal] sampling fails, try its parent...")
                     candidate_goal = candidate_goal.parent
                     idx -= 1
                 else:
@@ -153,7 +213,8 @@ class Pdm4arAgent(Agent):
                 print(f"[resample next goal] sampling... \n")
                 candidate_goal = new_candidate
 
-        self.waypoints = self.waypoints[idx:]
+        # remove all the parents of the current node
+        self.waypoints = self.waypoints[1:] if idx == 0 else self.waypoints[idx:]
         return candidate_goal
 
     def sampling_check_collision(self, waypoint: Node, offset=3.0, radius=5.0):
@@ -175,15 +236,17 @@ class Pdm4arAgent(Agent):
                 return True
         return False
 
-    def resample_goal(self, candidate: Node, offset=3.0, radius=5.0):
+    def resample_goal(self, candidate: Node, current_pos, offset=3.0, radius=5.0):
         """
         Resample a new goal around the current goal which is not safe enough.
+        :param current_pos: current node.
         :param candidate: target goal to be resampled.
         :param offset: safe offset for collision checks.
         :param radius: circle sampling radius.
         :return:
         """
-        current_pos = Node.from_state(self.current_state)
+        if current_pos is None:
+            current_pos = Node.from_state(self.current_state)
         dist, psi = current_pos.point_to(candidate)
         sampling_angles = np.linspace(psi - np.pi / 2, psi + np.pi / 2, 7)
         sampling_order = np.flipud(np.argsort(np.abs(sampling_angles - psi)))
@@ -200,12 +263,8 @@ class Pdm4arAgent(Agent):
                 return new_candidate
         return None
 
-    def get_safe_distance(self):
-        v = np.linalg.norm([self.current_state.vx, self.current_state.vy])
-        return v ** 2 / (2 * A_MAX)
-
     def replan(self, start, end):
-        self.planner = RrtStar(start, end, self.static_obstacles, safe_offset=3.0)
+        self.planner = RrtStar(start, end, self.static_obstacles, self.dvos, safe_offset=3.0, step_len=30)
         self.planner.planning()
         self.waypoints = []
 
@@ -213,6 +272,22 @@ class Pdm4arAgent(Agent):
             waypoint = Node(node)
             self.waypoints.append(waypoint)
         self.waypoints[0].parent = self.waypoints[0]
+
+        # the planner takes the nearest neighbor as the parent of the goal if it fails
+        # so check it and replan from the last waypoint before reaching the goal if in collision
+        if self.planner.is_collision(self.waypoints[-2], self.waypoints[-1], offset=3.0):
+            # use a smaller step length for better paths
+            goal_planner = RrtStar(self.waypoints[-2], self.waypoints[-1], self.static_obstacles,
+                                   self.dvos, safe_offset=3.0, step_len=10)
+            goal_planner.planning()
+            # replanning util a solution is found
+            while goal_planner.is_collision(Node(goal_planner.path[-2]), Node(goal_planner.path[-1]), offset=3.0):
+                goal_planner.planning()
+            self.waypoints.pop(-1)
+            for node in reversed(goal_planner.path):
+                waypoint = Node(node)
+                self.waypoints.append(waypoint)
+
         self.waypoints[-1].child = self.waypoints[-1]
 
         for i, waypoint in enumerate(self.waypoints):
@@ -285,12 +360,15 @@ class Pdm4arAgent(Agent):
         for s_obstacle in self.static_obstacles:
             shapely_viz.add_shape(s_obstacle.shape, color=s_obstacle.geometry.color, zorder=ZOrders.ENV_OBSTACLE)
         shapely_viz.add_shape(self.goal.get_plottable_geometry(), color="orange", zorder=ZOrders.GOAL, alpha=0.5)
+        if self.dynamic:
+            for npc in self.npc:
+                shapely_viz.add_shape(npc.occupancy)
         axs = shapely_viz.ax
         axs.autoscale()
         axs.set_aspect("equal")
 
         # plot safe boundary of obstacles
-        for safe_s_obstacle in self.planner.safe_s_obstacles[self.planner.offset]:
+        for safe_s_obstacle in self.planner.safe_obstacles[self.planner.offset]:
             axs.plot(*safe_s_obstacle.xy)
 
         # plot planned path
@@ -310,34 +388,12 @@ class Pdm4arAgent(Agent):
         dx = np.abs(self.current_state.vx) * np.cos(self.current_state.psi)
         dy = np.abs(self.current_state.vx) * np.sin(self.current_state.psi)
         axs.arrow(x_tail, y_tail, dx, dy, width=0.3, length_includes_head=True, color="r")
-        # axs.text(x_tail + 1, y_tail - .4, "$V_x$")
 
         v = np.linalg.norm(np.array([self.current_state.vx, self.current_state.vy]))
         drift_angle = np.arctan2(self.current_state.vy, self.current_state.vx)
         dx = v * np.cos(self.current_state.psi + drift_angle)
         dy = v * np.sin(self.current_state.psi + drift_angle)
         axs.arrow(x_tail, y_tail, dx, dy, width=0.3, length_includes_head=True, color="k")
-        # axs.text(x_tail + 1, y_tail - .4, "V")
-
-        # dx = np.abs(self.current_state.vy) * np.cos(self.current_state.psi + np.pi / 2)
-        # dy = np.abs(self.current_state.vy) * np.sin(self.current_state.psi + np.pi / 2)
-        # axs.arrow(x_tail + 1, y_tail - .4, dx, dy, width=0.5, length_includes_head=True, color="k")
-        # axs.text(x_tail + 1, y_tail - .4, "$V_y$")
-
-        # plot scan lanes
-        angle_dt = 0.1
-        dist = self.get_safe_distance()
-        psi_l = self.current_state.psi + angle_dt
-        psi_c = self.current_state.psi
-        psi_r = self.current_state.psi - angle_dt
-        dx_l, dy_l = dist * np.cos(psi_l), dist * np.sin(psi_l)
-        dx_c, dy_c = dist * np.cos(psi_c), dist * np.sin(psi_c)
-        dx_r, dy_r = dist * np.cos(psi_r), dist * np.sin(psi_r)
-        lines = [[(x_tail, y_tail), (x_tail + dx_l, y_tail + dy_l)],
-                 [(x_tail, y_tail), (x_tail + dx_c, y_tail + dy_c)],
-                 [(x_tail, y_tail), (x_tail + dx_r, y_tail + dy_r)]]
-        scan_lanes = mc.LineCollection(lines, linestyles='--', linewidths=1, colors='b')
-        axs.add_collection(scan_lanes)
 
         # plot current goal
         stops = np.array([[s.x, s.y] for s in self.stops])
