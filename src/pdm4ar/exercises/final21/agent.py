@@ -80,14 +80,16 @@ class Pdm4arAgent(Agent):
         self.visited_pts.append([self.current_state.x, self.current_state.y])
 
         if self.planner is None or self.is_path_in_collision():
+            max_iter = 1000
             self.start_pos = Node.from_state(self.current_state)
             self.goal_pos = Node([self.goal.goal.centroid.x, self.goal.goal.centroid.y])
-            self.replan(self.start_pos, self.goal_pos)
+            self.replan(self.start_pos, self.goal_pos, max_iter)
             self.stops = self.get_stops()
             while self.stops is None:
                 print(f"[replanning] cannot find available stops!")
-                self.replan(self.start_pos, self.goal_pos)
+                self.replan(self.start_pos, self.goal_pos, max_iter)
                 self.stops = self.get_stops()
+
             self.dpoints, self.C0 = self.fit_turning_curve(self.stops)
         elif self.dynamic:
             self.planner.update_npc(self.dvos)
@@ -263,8 +265,9 @@ class Pdm4arAgent(Agent):
                 return new_candidate
         return None
 
-    def replan(self, start, end):
-        self.planner = RrtStar(start, end, self.static_obstacles, self.dvos, safe_offset=3.0, step_len=30)
+    def replan(self, start, end, max_iter):
+        self.planner = RrtStar(start, end, self.static_obstacles, self.dvos,
+                               iter_max=max_iter, safe_offset=3.0, step_len=30)
         self.planner.planning()
         self.waypoints = []
 
@@ -278,7 +281,7 @@ class Pdm4arAgent(Agent):
         if self.planner.is_collision(self.waypoints[-2], self.waypoints[-1], offset=3.0):
             # use a smaller step length for better paths
             goal_planner = RrtStar(self.waypoints[-2], self.waypoints[-1], self.static_obstacles,
-                                   self.dvos, safe_offset=3.0, step_len=10)
+                                   self.dvos, iter_max=max_iter, safe_offset=3.0, step_len=10)
             goal_planner.planning()
             # replanning util a solution is found
             while goal_planner.is_collision(Node(goal_planner.path[-2]), Node(goal_planner.path[-1]), offset=3.0):
@@ -330,7 +333,7 @@ class Pdm4arAgent(Agent):
                 curve_origin = [mid.x - long_side * np.cos((np.pi - (psi_2 + psi_1)) / 2),
                                 mid.y + long_side * np.sin((np.pi - (psi_2 + psi_1)) / 2)]
                 C0.append(curve_origin)
-                daa = 0.3 * step_size / turning_radius
+                daa = 0.8 * step_size / turning_radius
                 for aa in np.arange(0, psi_2 - psi_1, daa):
                     dpoint = Node([curve_origin[0] + turning_radius * np.sin(psi_1 + aa),
                                    curve_origin[1] - turning_radius * np.cos(psi_1 + aa)])
