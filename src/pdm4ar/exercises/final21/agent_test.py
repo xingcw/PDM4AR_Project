@@ -22,8 +22,8 @@ if __name__ == '__main__':
     ax.set_aspect("equal")
     plt.show()
 
-    x_start = (x0.x, x0.y)
-    x_goal = (goal.goal.centroid.x, goal.goal.centroid.y)
-
-    rrt_star = RrtStar(x_start, x_goal, 10, 0.10, 20, 2000, dg_scenario)
-    rrt_star.planning()
+    # x_start = (x0.x, x0.y)
+    # x_goal = (goal.goal.centroid.x, goal.goal.centroid.y)
+    #
+    # rrt_star = RrtStar(x_start, x_goal, 10, 0.10, 20, 2000, dg_scenario)
+    # rrt_star.planning()

@@ -9,7 +9,7 @@ import collections
 from typing import Sequence, Optional, List
 from dg_commons.sim.models.obstacles import StaticObstacle
 from dg_commons.sim.models.spacecraft import SpacecraftState
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString, Polygon, Point
 from pdm4ar.exercises.final21.plot_path import Plotting
 
 
@@ -105,11 +105,11 @@ class RrtStar:
         safe_obstacles = []
         if offset:
             for s_obstacle in self.static_obstacles[1:]:
-                safe_boundary = s_obstacle.shape.buffer(offset, resolution=16, join_style=2, mitre_limit=1).exterior
+                safe_boundary = s_obstacle.shape.buffer(offset, resolution=16, join_style=2, mitre_limit=1)
                 safe_obstacles.append(safe_boundary)
             if self.dynamic_obstacles is not None:
                 for d_obs in self.dynamic_obstacles:
-                    safe_boundary = d_obs.buffer(offset, resolution=16, join_style=2, mitre_limit=1).exterior
+                    safe_boundary = d_obs.buffer(offset, resolution=16, join_style=2, mitre_limit=1)
                     safe_obstacles.append(safe_boundary)
         else:
             safe_obstacles = self.static_obstacles[1:]
@@ -129,7 +129,7 @@ class RrtStar:
         if offset:
             for s_obstacle in self.safe_obstacles[offset]:
                 path = LineString([(node_near.x, node_near.y), (node_new.x, node_new.y)])
-                if path.intersects(s_obstacle):
+                if path.intersects(s_obstacle.exterior):
                     return True
         else:
             for s_obstacle in self.safe_obstacles[offset]:
