@@ -3,12 +3,12 @@ from dg_commons.maps.shapely_viz import ShapelyViz
 from dg_commons.sim.simulator_visualisation import ZOrders
 from matplotlib import pyplot as plt
 import sys
-sys.path.append("..")
+sys.path.append("/home/colinqian/Project/PDM4AR_final_project/PDM4AR_Project/src")
 from pdm4ar.exercises_def.final21.scenario import get_dgscenario
 from RRT_star import RrtStar
 
 if __name__ == '__main__':
-    matplotlib.use('TkAgg')
+    #matplotlib.use('TkAgg')
     dg_scenario, goal, x0 = get_dgscenario()
     ax = plt.gca()
     shapely_viz = ShapelyViz(ax)

@@ -17,7 +17,7 @@ from pdm4ar.exercises.final21.RRT_star import RrtStar, Node
 from pdm4ar.exercises.final21.Controller import MPCController
 
 A_MAX = 10
-matplotlib.use('TkAgg')
+#matplotlib.use('TkAgg')
 
 
 class Pdm4arAgent(Agent):
@@ -43,6 +43,13 @@ class Pdm4arAgent(Agent):
         self.dpoints = []
         self.stops = []
         self.visited_pts = []
+        self.mpc_setup = {
+            'n_horizon': 40,
+            't_step': 0.1,
+            'n_robust': 0,
+            'store_full_solution': False,
+        }
+        self.controller = MPCController(self.sg, self.mpc_setup)
         # TODO: get rid of time stamp
         self.t_step = 0
         self.name = None
@@ -97,14 +104,13 @@ class Pdm4arAgent(Agent):
         self.t_step += 1
         dpoints = self.dpoints[self.t_step:]
 
-        horizon = 40
+
         # add terminate state to the end of the path when the horizon is not reached
-        if len(dpoints) < horizon:
+        if len(dpoints) < self.mpc_setup['n_horizon']:
             self.dpoints.append(self.dpoints[-1])
             dpoints.append(self.dpoints[-1])
         try:
-            controller = MPCController(dpoints, self.sg, self.current_state.as_ndarray(), horizon)
-            commands = controller.mpc_command(self.current_state.as_ndarray(), dpoints).squeeze()
+            commands = self.controller.mpc_command(self.current_state.as_ndarray(), dpoints).squeeze()
             commands = SpacecraftCommands(acc_left=commands[0], acc_right=commands[1])
         except:
             commands = SpacecraftCommands(acc_left=0, acc_right=0)

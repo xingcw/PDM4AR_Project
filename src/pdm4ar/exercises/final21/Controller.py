@@ -7,8 +7,15 @@ from pdm4ar.exercises.final21.RRT_star import Node
 
 
 class MPCController(object):
-    def __init__(self, path: Sequence[Node], sg: SpacecraftGeometry, x0: SpacecraftState, horizon: int):
+    def __init__(self, sg: SpacecraftGeometry,  mpc_setup: dict):
         # either 'discrete' or 'continuous'
+        self.sg = sg
+        self.mpc_setup=mpc_setup
+        self.initialized = False
+
+    def initialization(self, path):
+        sg = self.sg
+        horizon = self.mpc_setup['n_horizon']
         model_type = 'continuous'
         model = do_mpc.model.Model(model_type)
 
@@ -45,14 +52,9 @@ class MPCController(object):
 
         # setup MPC controller
         mpc = do_mpc.controller.MPC(model)
-        setup_mpc = {
-            'n_horizon': horizon,
-            't_step': 0.1,
-            'n_robust': 0,
-            'store_full_solution': False,
-        }
-        mpc.set_param(**setup_mpc)
-        self.n_horizon = setup_mpc['n_horizon']
+
+        mpc.set_param(**self.mpc_setup)
+        self.n_horizon = self.mpc_setup['n_horizon']
 
         # objective setup
         # TODO: tuning Q, R weights
@@ -81,18 +83,24 @@ class MPCController(object):
         mpc.bounds['upper', '_u', 'acc_r'] = 10
 
         self.mpc = mpc
+
         self.update_planned_target(path)
         self.mpc.setup()
 
-        self.mpc.x0 = x0
+        self.mpc.x0 = np.zeros((6, 1)).reshape(-1, 1)
         self.mpc.set_initial_guess()
+        self.initialized = True
 
     def print_state(self):
         return self.model.x.labels()
 
     def mpc_command(self, state, planned_seq):
-        self.update_planned_target(planned_seq)
-        return self.mpc.make_step(state)
+        if self.initialized:
+            self.update_planned_target(planned_seq)
+            return self.mpc.make_step(state)
+        else:
+            self.initialization(planned_seq)
+            return self.mpc.make_step(state)
 
     def update_planned_target(self, plan_sequence):
         tvp_template = self.mpc.get_tvp_template()
