@@ -131,6 +131,12 @@ class Pdm4arAgent(Agent):
         return commands
 
     def check_dpoints_collision(self, start, horizon):
+        """
+        check if a discrete waypoint is in collision with the other objects.
+        :param start: start waypoint.
+        :param horizon: horizon for checking.
+        :return:
+        """
         future_dpoints = self.dpoints[start:start+horizon]
         is_collision = np.zeros(len(future_dpoints))
         for i, dpoint in enumerate(future_dpoints):
@@ -139,6 +145,11 @@ class Pdm4arAgent(Agent):
         return is_collision
 
     def resample_dpoints(self):
+        """
+        substitute the discrete points which are in collision with the other objects (intuitively only dvos)
+        with the closest non-collision discrete points. (so that the robot crosses dvos quickly)
+        :return:
+        """
         is_collision = self.check_dpoints_collision(self.t_step, horizon=40)
         collision_start = np.min(np.argwhere(is_collision == 1))
         future_collision = self.check_dpoints_collision(self.t_step+collision_start, len(self.dpoints))
