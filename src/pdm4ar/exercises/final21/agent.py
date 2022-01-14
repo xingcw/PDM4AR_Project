@@ -43,13 +43,20 @@ class Pdm4arAgent(Agent):
         self.dpoints = []
         self.stops = []
         self.visited_pts = []
+        #======mpc setup=========
         self.mpc_setup = {
             'n_horizon': 40,
             't_step': 0.1,
             'n_robust': 0,
             'store_full_solution': False,
         }
-        self.controller = MPCController(self.sg, self.mpc_setup)
+        mpc_cost_coef = {
+            'pos' : 5,
+            'angular_vel':3,
+            'linear_vel':3,
+            'regularization':1e-2
+        }
+        self.controller = MPCController(self.sg, self.mpc_setup,opt_interval=2,cost_func_coef=mpc_cost_coef)
         # TODO: get rid of time stamp
         self.t_step = 0
         self.name = None
@@ -95,7 +102,7 @@ class Pdm4arAgent(Agent):
             while self.stops is None:
                 print(f"[replanning] cannot find available stops!")
                 self.replan(self.start_pos, self.goal_pos, max_iter)
-                self.stops = self.get_stops()
+                self.stops = self.get_stops() #list of node object
 
             self.dpoints, self.C0 = self.fit_turning_curve(self.stops)
         elif self.dynamic:
@@ -103,6 +110,7 @@ class Pdm4arAgent(Agent):
 
         self.t_step += 1
         dpoints = self.dpoints[self.t_step:]
+
 
 
         # add terminate state to the end of the path when the horizon is not reached
