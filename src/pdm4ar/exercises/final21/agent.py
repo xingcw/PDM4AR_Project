@@ -17,7 +17,7 @@ from pdm4ar.exercises.final21.RRT_star import RrtStar, Node
 from pdm4ar.exercises.final21.Controller import MPCController
 
 A_MAX = 10
-matplotlib.use('TkAgg')
+#matplotlib.use('TkAgg')
 
 
 class Pdm4arAgent(Agent):
@@ -174,17 +174,16 @@ class Pdm4arAgent(Agent):
         refer to shapely for more information: https://shapely.readthedocs.io/en/stable/manual.html#polygons
         :return: dynamic obstacles
         """
+        from shapely import affinity
+        from shapely.ops import unary_union
         dvos = []
         for npc in self.npc:
-            minx, miny, maxx, maxy = npc.occupancy.bounds
-            radius = np.linalg.norm([maxx-minx, maxy-miny]) / 2
+            oriented_bounding_box = npc.occupancy.minimum_rotated_rectangle
             v = np.linalg.norm([npc.state.vx, npc.state.vy])
             aa = np.arctan2(npc.state.vy, npc.state.vx) + npc.state.psi
             dx, dy = v * np.cos(aa), v * np.sin(aa)
-            start = [npc.state.x, npc.state.y]
-            end = [2*dx + npc.state.x, 2*dy + npc.state.y]
-            path = LineString([start, end])
-            obs = path.buffer(distance=radius)
+            new_polygons = [affinity.translate(npc.occupancy.buffer(distance = 3*s), xoff=dx*s, yoff=dy*s) for s in np.linspace(0,1,10)]
+            obs = unary_union(new_polygons)
             dvos.append(obs)
         return dvos
 
