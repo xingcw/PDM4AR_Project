@@ -7,7 +7,7 @@ if __name__ == "__main__":
     contracts.disable_all()
     static_records = []
     columns = ["seed", "goal", "collision", "distance", "time"]
-    for i, seed in enumerate([463, 335, 805, 293, 721, 413]):
+    for i, seed in enumerate([0, 463, 335, 805, 293, 721, 413]):
         print(f"{'=' * 20} Current Test Number:{i}, Seed: {seed} {'=' * 20}")
         try:
             evals = exercise_without_compmake("final21", seed=seed)

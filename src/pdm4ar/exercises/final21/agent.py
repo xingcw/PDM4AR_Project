@@ -117,7 +117,7 @@ class Pdm4arAgent(Agent):
                 # TODO: resample the start point if it's inside the dvo
                 self.get_new_path(start_pos)
                 self.stops.insert(0, Node.from_state(self.current_state))
-                if not self.planner.s_start.equal(fixed_stop):
+                if not self.planner.s_start.equal(fixed_stop) and not self.sampling_check_collision(fixed_stop, radius=0.0):
                     self.stops.insert(1, fixed_stop)
                 self.dpoints, self.C0 = self.fit_turning_curve(self.stops)
                 self.last_stop = self.stops.pop(0)
@@ -199,7 +199,7 @@ class Pdm4arAgent(Agent):
         future_collision = self.check_dpoints_collision(self.t_step + collision_start, len(self.dpoints))
         jump_start = np.argmin(future_collision)
         new_dpoints = self.dpoints[:self.t_step + collision_start]
-        new_dpoints.extend([self.dpoints[self.t_step + collision_start + jump_start]] * jump_start)
+        new_dpoints.extend([self.dpoints[self.t_step + collision_start + jump_start]] * np.min([jump_start, 10]))
         new_dpoints.extend(self.dpoints[self.t_step + collision_start + jump_start:])
         self.dpoints = new_dpoints
 
@@ -533,10 +533,10 @@ class Pdm4arAgent(Agent):
         ref: https://stackoverflow.com/questions/328107/how-can-you-determine-a-point-is-between-two-other-points-on
         -a-line-segment
         """
-
         dot_product = (c.x - a.x) * (b.x - a.x) + (c.y - a.y) * (b.y - a.y)
         ab, _ = a.point_to(b)
         ac, _ = a.point_to(c)
-        angle = np.arccos(dot_product / (ab * ac))
-        return True if angle < 0.2 else False
+        angle = np.arccos(dot_product / (ab * ac + 1e-16))
+        print(f"[reach stop check] angle: {angle}")
+        return True if angle < 0.5 else False
 
