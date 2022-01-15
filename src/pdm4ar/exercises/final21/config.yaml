@@ -20,4 +20,8 @@ algo:
     # adaptive dvo
     max_num_collision: 5
 
+    # step size
+    min_step_size: 0.3
+    max_step_size: 1.5
+
 

@@ -424,7 +424,9 @@ class Pdm4arAgent(Agent):
             dist_1, psi_1 = start.point_to(mid)
             dist_2, psi_2 = mid.point_to(end)
             turning_dist = min(turning_dist, dist_1, dist_2) / 2
-            step_size = self.bind_to_range(max(dist_1, dist_2) / 50, 0.2, 2.0)
+            min_step_size = self.config['algo']['min_step_size']
+            max_step_size = self.config['algo']['max_step_size']
+            step_size = self.bind_to_range(max(dist_1, dist_2) / 50, min_step_size, max_step_size)
 
             # discretize start/2 -> mid
             start_dist = 0 if start.equal(waypoints[0]) else dist_1 / 2
