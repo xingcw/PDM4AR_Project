@@ -28,7 +28,7 @@ def get_dgscenario(seed: Optional[int] = None) -> Tuple[DgScenario, PlanningGoal
     if seed is not None:
         random.seed(seed)
 
-    positions = [(50, 50), (50, 10), (10, 50), (10, 85), (75, 80), (80, 30), ]
+    positions = [(50, 50), (50, 10), (10, 50), (10, 85), (75, 70), (80, 30), ]
     for pos in positions:
         poly = Polygon(create_random_starshaped_polygon(*pos, 10, 0.5, 0.5, 10))
         shapes.append(poly)

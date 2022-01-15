@@ -7,7 +7,7 @@ if __name__ == "__main__":
     contracts.disable_all()
     static_records = []
     columns = ["seed", "goal", "collision", "distance", "time"]
-    for i, seed in enumerate(np.random.randint(0, 1000, 100)):
+    for i, seed in enumerate([463, 335, 805, 293, 721, 413]):
         print(f"{'=' * 20} Current Test Number:{i}, Seed: {seed} {'=' * 20}")
         try:
             evals = exercise_without_compmake("final21", seed=seed)
@@ -19,7 +19,7 @@ if __name__ == "__main__":
                                    np.sum(s_records["goal"]) + 1e-16),
                        np.sum(np.multiply(s_records["goal"], s_records["time"])) / (np.sum(s_records["goal"]) + 1e-16)]
             s_records = pd.concat([s_records, pd.DataFrame([s_stats], columns=columns)])
-            s_records.to_csv(path_or_buf="../../out/static.csv")
+            s_records.to_csv(path_or_buf="../../out/dynamic.csv")
         except:
             print("Errors!")
             continue

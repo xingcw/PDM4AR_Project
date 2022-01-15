@@ -7,8 +7,18 @@ from pdm4ar.exercises.final21.RRT_star import Node
 
 
 class MPCController(object):
-    def __init__(self, path: Sequence[Node], sg: SpacecraftGeometry, x0: SpacecraftState, horizon: int):
+    def __init__(self, sg: SpacecraftGeometry,  mpc_setup: dict,**kwargs):
         # either 'discrete' or 'continuous'
+        self.sg = sg
+        self.mpc_setup = mpc_setup
+        self.initialized = False
+        self.opt_interval = kwargs['opt_interval']
+        self.count = 0
+        self.cost_func_coef = kwargs['cost_func_coef']
+
+    def initialization(self, path):
+        sg = self.sg
+        horizon = self.mpc_setup['n_horizon']
         model_type = 'continuous'
         model = do_mpc.model.Model(model_type)
 
@@ -45,24 +55,22 @@ class MPCController(object):
 
         # setup MPC controller
         mpc = do_mpc.controller.MPC(model)
-        setup_mpc = {
-            'n_horizon': horizon,
-            't_step': 0.1,
-            'n_robust': 0,
-            'store_full_solution': False,
-        }
-        mpc.set_param(**setup_mpc)
-        self.n_horizon = setup_mpc['n_horizon']
+
+        mpc.set_param(**self.mpc_setup)
+        self.n_horizon = self.mpc_setup['n_horizon']
 
         # objective setup
         # TODO: tuning Q, R weights
-        mterm = 5 * (x - x_gt) ** 2 + 5 * (y - y_gt) ** 2 + 3 * (psi - psi_gt)**2 + 3 * (vy - vy_gt) ** 2
-        lterm = 5 * (x - x_gt) ** 2 + 5 * (y - y_gt) ** 2 + 3 * (psi - psi_gt)**2 + 3 * (vy - vy_gt) ** 2
+
+        mterm = self.cost_func_coef['pos'] * ((x - x_gt) ** 2 + (y - y_gt) ** 2) +\
+                self.cost_func_coef['angular_vel'] * (psi - psi_gt)**2 + self.cost_func_coef['linear_vel'] * (vy - vy_gt) ** 2
+        lterm = self.cost_func_coef['pos'] * ((x - x_gt) ** 2 + (y - y_gt) ** 2 )+ \
+                self.cost_func_coef['angular_vel']  * (psi - psi_gt)**2 + self.cost_func_coef['linear_vel']  * (vy - vy_gt) ** 2
 
         mpc.set_objective(mterm=mterm, lterm=lterm)
         mpc.set_rterm(
-            acc_l=1e-2,
-            acc_r=1e-2
+            acc_l=self.cost_func_coef['regularization'],
+            acc_r=self.cost_func_coef['regularization']
         )
 
         # constraints
@@ -81,17 +89,29 @@ class MPCController(object):
         mpc.bounds['upper', '_u', 'acc_r'] = 10
 
         self.mpc = mpc
+
         self.update_planned_target(path)
         self.mpc.setup()
 
-        self.mpc.x0 = x0
+        self.mpc.x0 = np.zeros((6, 1)).reshape(-1, 1)
         self.mpc.set_initial_guess()
+        self.initialized = True
+
+
 
     def print_state(self):
         return self.model.x.labels()
 
+
     def mpc_command(self, state, planned_seq):
-        self.update_planned_target(planned_seq)
+        if self.initialized:
+            if self.count == self.opt_interval:
+                self.update_planned_target(planned_seq)
+                self.count = 0
+        else:
+            self.initialization(planned_seq)
+
+        self.count += 1
         return self.mpc.make_step(state)
 
     def update_planned_target(self, plan_sequence):
