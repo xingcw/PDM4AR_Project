@@ -153,6 +153,6 @@ On Moodle, we will open an apposite tool.
 
 #### When to submit
 We will open the submission tool by the end of next week.
-The ultimate deadline for submission is the 31st of December 2021 at 23:59 (CET).
+The ultimate deadline for submission is the 15th of January 2022 at 23:59 (CET).
 
 

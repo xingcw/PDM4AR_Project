@@ -33,7 +33,7 @@ This can contribute up to 0.25 toward your final grade, only if they help to imp
 
 | Graded Exercise    | **Release** date    | **Hand-in** date    |
 |-----------------	|--------------	|--------------	|
-| 1.                | End of Nov.   | Dec. 22nd (23:59 CET) |
+| 1.                | End of Nov.   | Jan. 15th (23:59 CET) |
 
 You can solve the graded exercise in groups of up to 4 people. Detailed instructions on how to hand-in these exercises will
 follow.

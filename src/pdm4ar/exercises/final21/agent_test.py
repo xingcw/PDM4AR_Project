@@ -2,14 +2,12 @@ import matplotlib
 from dg_commons.maps.shapely_viz import ShapelyViz
 from dg_commons.sim.simulator_visualisation import ZOrders
 from matplotlib import pyplot as plt
-import sys
-sys.path.append("/home/colinqian/Project/PDM4AR_final_project/PDM4AR_Project/src")
+
 from pdm4ar.exercises_def.final21.scenario import get_dgscenario
-from RRT_star import RrtStar
 
 if __name__ == '__main__':
-    #matplotlib.use('TkAgg')
-    dg_scenario, goal, x0 = get_dgscenario()
+    matplotlib.use('TkAgg')
+    dg_scenario, goal, _ = get_dgscenario()
     ax = plt.gca()
     shapely_viz = ShapelyViz(ax)
 
@@ -21,9 +19,3 @@ if __name__ == '__main__':
     ax.set_facecolor('k')
     ax.set_aspect("equal")
     plt.show()
-
-    # x_start = (x0.x, x0.y)
-    # x_goal = (goal.goal.centroid.x, goal.goal.centroid.y)
-    #
-    # rrt_star = RrtStar(x_start, x_goal, 10, 0.10, 20, 2000, dg_scenario)
-    # rrt_star.planning()

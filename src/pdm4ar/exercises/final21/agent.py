@@ -244,7 +244,8 @@ class Pdm4arAgent(Agent):
             return False
         for start, end in zip(self.stops[:replan_horizon], self.stops[1:replan_horizon+1]):
             if self.planner.is_collision(start, end, offset):
-                self.dvo_num_collision[self.planner.collision_dvo_id] += 1
+                if self.dynamic:
+                    self.dvo_num_collision[self.planner.collision_dvo_id] += 1
                 return True
         return False
 
