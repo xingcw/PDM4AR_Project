@@ -50,6 +50,7 @@ class Pdm4arAgent(Agent):
         self.npc = []
         self.dvos = None
         self.dvo_num_collision = None
+        self.cur_collision_dvo = None
         self.dynamic = False
         self.last_stop = None
         # TODO: remove later
@@ -125,6 +126,13 @@ class Pdm4arAgent(Agent):
         horizon = self.config['controller']['setup']['n_horizon']
         is_collision = self.check_dpoints_collision(self.t_step, horizon)
         if is_collision.any():
+            start_pos = Node.from_state(self.current_state)
+            if self.check_relative_angle(self.cur_collision_dvo) and \
+                    not self.sampling_check_collision(start_pos, radius=3.0):
+                self.get_new_path(start_pos)
+                self.dpoints, self.C0 = self.fit_turning_curve(self.stops)
+                self.last_stop = self.stops.pop(0)
+                self.t_step = 0
             self.resample_dpoints()
 
         self.t_step += 1
@@ -154,6 +162,15 @@ class Pdm4arAgent(Agent):
             matplotlib.use('TkAgg')
             self.plot_state()
         return commands
+
+    def check_relative_angle(self, npc, thresh=np.pi/2):
+        if npc is not None:
+            dist, agent_aa = Node.from_state(self.current_state).point_to(self.stops[0])
+            dvo_aa = np.arctan2(npc.state.vy, npc.state.vx) + npc.state.psi
+            if np.abs(agent_aa - dvo_aa) > thresh:
+                return True
+        else:
+            return False
 
     def reach_stop(self):
         if self.dpoints[self.t_step].equal(self.stops[0]):
@@ -200,14 +217,15 @@ class Pdm4arAgent(Agent):
         :return:
         """
         is_collision = self.check_dpoints_collision(self.t_step, horizon=self.config['controller']['setup']['n_horizon'])
-        collision_start = np.min(np.argwhere(is_collision == 1))
-        future_collision = self.check_dpoints_collision(self.t_step + collision_start, len(self.dpoints))
-        jump_start = np.argmin(future_collision)
-        new_dpoints = self.dpoints[:self.t_step + collision_start]
-        num_wait = self.config['algo']['max_num_wait_dpoints']
-        new_dpoints.extend([self.dpoints[self.t_step + collision_start + jump_start]] * np.min([jump_start, num_wait]))
-        new_dpoints.extend(self.dpoints[self.t_step + collision_start + jump_start:])
-        self.dpoints = new_dpoints
+        if is_collision.any():
+            collision_start = np.min(np.argwhere(is_collision == 1))
+            future_collision = self.check_dpoints_collision(self.t_step + collision_start, len(self.dpoints))
+            jump_start = np.argmin(future_collision)
+            new_dpoints = self.dpoints[:self.t_step + collision_start]
+            num_wait = self.config['algo']['max_num_wait_dpoints']
+            new_dpoints.extend([self.dpoints[self.t_step + collision_start + jump_start]] * np.min([jump_start, num_wait]))
+            new_dpoints.extend(self.dpoints[self.t_step + collision_start + jump_start:])
+            self.dpoints = new_dpoints
 
     def get_dynamic_velocity_obstacle(self):
         """
@@ -227,7 +245,7 @@ class Pdm4arAgent(Agent):
             max_num_collision = self.config['algo']['max_num_collision']
             scale = 1 / (1.0 + self.dvo_num_collision[i] / max_num_collision)
             dx, dy = v * np.cos(aa) * scale, v * np.sin(aa) * scale
-            new_polygons = [affinity.translate(npc.occupancy.buffer(distance=5 * scale * s), xoff=dx * s, yoff=dy * s)
+            new_polygons = [affinity.translate(npc.occupancy.buffer(distance=8 * scale * s), xoff=dx * s, yoff=dy * s)
                             for s in np.linspace(0, 1, 10)]
             obs = unary_union(new_polygons)
             dvos.append(obs)
@@ -331,14 +349,18 @@ class Pdm4arAgent(Agent):
             y = waypoint.y + radius * np.sin(aa)
             check_point = Node([x, y])
             if self.planner.is_collision(waypoint, check_point, offset):
+                if self.dynamic:
+                    self.cur_collision_dvo = self.npc[self.planner.collision_dvo_id]
                 return True
 
         # add containing checks
         if self.dynamic:
             obstacles = self.planner.safe_obstacles[offset]["dynamic"]
             check_point = Point(waypoint.x, waypoint.y)
-            for obs in obstacles:
+            for i, obs in enumerate(obstacles):
                 if obs.contains(check_point):
+                    if self.dynamic:
+                        self.cur_collision_dvo = self.npc[i]
                     return True
 
         return False
