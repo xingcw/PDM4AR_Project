@@ -13,7 +13,8 @@ controller:
         regularization: 1.0e-2
 
 algo:
-    debug: true
+    debug: false
+    
     # when resample dpoints
     max_num_wait_dpoints: 10
 

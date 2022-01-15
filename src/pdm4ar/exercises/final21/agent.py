@@ -18,9 +18,6 @@ from dg_commons.sim.models.spacecraft_structures import SpacecraftGeometry
 from pdm4ar.exercises.final21.RRT_star import RrtStar, Node
 from pdm4ar.exercises.final21.Controller import MPCController
 
-A_MAX = 10
-matplotlib.use('TkAgg')
-
 
 class Pdm4arAgent(Agent):
     """This is the PDM4AR agent.
@@ -153,6 +150,7 @@ class Pdm4arAgent(Agent):
         print("[passed time]", len(self.visited_pts))
 
         if self.config['algo']['debug']:
+            matplotlib.use('TkAgg')
             self.plot_state()
         return commands
 

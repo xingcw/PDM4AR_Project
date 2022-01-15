@@ -49,10 +49,10 @@ def algo_placeholder(ex_in):
     return None
 
 
-def get_final21(seed: int) -> Exercise:
+def get_final21() -> Exercise:
     test_values = [
-        TestValueExFinal21(get_sim_context_static(seed)),
-        TestValueExFinal21(get_sim_context_dynamic(seed)),
+        TestValueExFinal21(get_sim_context_static()),
+        TestValueExFinal21(get_sim_context_dynamic()),
     ]
 
     return Exercise[TestValueExFinal21, Any](
