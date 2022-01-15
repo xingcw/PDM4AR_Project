@@ -45,7 +45,7 @@ class Pdm4arAgent(Agent):
         self.visited_pts = []
         #======mpc setup=========
         self.mpc_setup = {
-            'n_horizon': 40,
+            'n_horizon': 50,
             't_step': 0.1,
             'n_robust': 0,
             'store_full_solution': False,
@@ -110,7 +110,7 @@ class Pdm4arAgent(Agent):
             self.dpoints, self.C0 = self.fit_turning_curve(self.stops)
             self.t_step = 0
 
-        horizon = 40
+        horizon = self.mpc_setup['n_horizon']
         is_collision = self.check_dpoints_collision(self.t_step, horizon)
         if is_collision.any():
             self.resample_dpoints()
@@ -133,6 +133,7 @@ class Pdm4arAgent(Agent):
         print(commands)
         print("-"*20, "Current State", "-"*20)
         print(self.current_state)
+        print(len(dpoints))
 
         if self.debug:
             self.plot_state()
@@ -182,7 +183,7 @@ class Pdm4arAgent(Agent):
             v = np.linalg.norm([npc.state.vx, npc.state.vy])
             aa = np.arctan2(npc.state.vy, npc.state.vx) + npc.state.psi
             dx, dy = v * np.cos(aa), v * np.sin(aa)
-            new_polygons = [affinity.translate(npc.occupancy.buffer(distance = 3*s), xoff=dx*s, yoff=dy*s) for s in np.linspace(0,1,10)]
+            new_polygons = [affinity.translate(npc.occupancy.buffer(distance = 4*s), xoff=dx*s, yoff=dy*s) for s in np.linspace(0,1,10)]
             obs = unary_union(new_polygons)
             dvos.append(obs)
         return dvos
