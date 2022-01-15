@@ -68,14 +68,12 @@ class Node:
 
 class RrtStar:
     def __init__(self, x_start, x_goal, static_obstacles: Sequence[StaticObstacle], dynamic_obstacles=None,
-                 visualize=False,
-                 step_len=10, goal_sample_rate=0.1, search_radius=20, iter_max=2000, safe_offset=3.0, safe_boarder=3.0):
+                 visualize=False, goal_sample_rate=0.1, search_radius=20, iter_max=2000, safe_offset=3.0,
+                 step_len=10, safe_boarder=3.0):
         self.s_start = x_start
         self.s_goal = x_goal
-        self.step_len = step_len
+
         self.goal_sample_rate = goal_sample_rate
-        self.search_radius = search_radius
-        self.iter_max = iter_max
         self.vertex = [self.s_start]
         self.plotting = Plotting(x_start, x_goal)
         self.visualize = visualize
@@ -84,25 +82,26 @@ class RrtStar:
         self.dynamic_obstacles = dynamic_obstacles
         self.dynamic = True if dynamic_obstacles is not None else False
         self.collision_dvo_id = 0
-        self.offset = safe_offset
-        self.safe_boarder = safe_boarder
-        # environment boarder
+
+        # environment boarder and scale other params
         env = self.static_obstacles[0].shape
         self.x_range = [env.bounds[0], env.bounds[2]]
         self.y_range = [env.bounds[1], env.bounds[3]]
-        self.safe_s_obs = {0.0: self.get_safe_s_obs(0.0),
-                           2.0: self.get_safe_s_obs(2.0),
-                           3.0: self.get_safe_s_obs(3.0)}
-        self.safe_d_obs = {0.0: self.get_safe_d_obs(0.0),
-                           2.0: self.get_safe_d_obs(2.0),
-                           3.0: self.get_safe_d_obs(3.0)}
-        self.safe_obstacles = self.combine_s_d()
+        self.scale = np.round(max(env.bounds[2]-env.bounds[0], env.bounds[3]-env.bounds[1]) / 100, decimals=2)
+        self.step_len = step_len * self.scale
+        self.search_radius = search_radius * self.scale
+        self.iter_max = (iter_max * self.scale).astype(int)
+        self.offset = safe_offset * self.scale
+        self.safe_boarder = safe_boarder * self.scale
+
+        self.safe_s_obs = {}
+        self.safe_d_obs = {}
+        self.safe_obstacles = {}
 
     def update_npc(self, obstacle):
         self.dynamic_obstacles = obstacle if isinstance(obstacle, list) else [obstacle]
-        self.safe_d_obs = {0.0: self.get_safe_d_obs(0.0),
-                           2.0: self.get_safe_d_obs(2.0),
-                           3.0: self.get_safe_d_obs(3.0)}
+        for offset in self.safe_d_obs.keys():
+            self.safe_d_obs = {offset: self.get_safe_d_obs(offset)}
         self.safe_obstacles = {}
         self.safe_obstacles = self.combine_s_d()
 
@@ -116,6 +115,7 @@ class RrtStar:
         return safe_obstacles
 
     def update_safe_obstacles(self, offset):
+        # scaled offset
         svo = self.get_safe_s_obs(offset)
         self.safe_obstacles.update({offset: {"static": svo}})
         if self.dynamic:
@@ -123,11 +123,14 @@ class RrtStar:
             self.safe_obstacles.update({offset: {"static": svo, "dynamic": dvo}})
 
     def get_safe_env_bound(self, offset=3.0):
+        # non-scale offset
+        offset *= self.scale
         x_range = [self.x_range[0] + offset, self.x_range[1] - offset]
         y_range = [self.y_range[0] + offset, self.y_range[1] - offset]
         return x_range, y_range
 
     def get_safe_s_obs(self, offset=2.0):
+        # scaled offset
         safe_s_obs = []
         if offset:
             for s_obstacle in self.static_obstacles[1:]:
@@ -138,6 +141,7 @@ class RrtStar:
         return safe_s_obs
 
     def get_safe_d_obs(self, offset=2.0):
+        # scaled offset
         safe_d_obs = []
         if offset:
             if self.dynamic_obstacles is not None:
@@ -152,9 +156,12 @@ class RrtStar:
 
     def is_collision(self, node_near, node_new, offset=None):
         if offset is not None:
+            # non-scaled offset from agent side
+            offset *= self.scale
             if offset not in self.safe_obstacles.keys():
                 self.update_safe_obstacles(offset)
         else:
+            # scaled offset in the planner
             offset = self.offset
             if offset not in self.safe_obstacles.keys():
                 self.update_safe_obstacles(offset)
