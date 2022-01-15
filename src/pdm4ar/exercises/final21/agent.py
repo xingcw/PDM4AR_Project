@@ -1,4 +1,5 @@
 from typing import Sequence, List
+from copy import copy
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
@@ -17,7 +18,7 @@ from pdm4ar.exercises.final21.RRT_star import RrtStar, Node
 from pdm4ar.exercises.final21.Controller import MPCController
 
 A_MAX = 10
-#matplotlib.use('TkAgg')
+matplotlib.use('TkAgg')
 
 
 class Pdm4arAgent(Agent):
@@ -43,7 +44,7 @@ class Pdm4arAgent(Agent):
         self.dpoints = []
         self.stops = []
         self.visited_pts = []
-        #======mpc setup=========
+        # ======mpc setup=========
         self.mpc_setup = {
             'n_horizon': 50,
             't_step': 0.1,
@@ -51,12 +52,12 @@ class Pdm4arAgent(Agent):
             'store_full_solution': False,
         }
         mpc_cost_coef = {
-            'pos' : 5,
-            'angular_vel':3,
-            'linear_vel':3,
-            'regularization':1e-2
+            'pos': 5,
+            'angular_vel': 3,
+            'linear_vel': 3,
+            'regularization': 1e-2
         }
-        self.controller = MPCController(self.sg, self.mpc_setup,opt_interval=2,cost_func_coef=mpc_cost_coef)
+        self.controller = MPCController(self.sg, self.mpc_setup, opt_interval=2, cost_func_coef=mpc_cost_coef)
         # TODO: get rid of time stamp
         self.t_step = 0
         self.name = None
@@ -64,6 +65,7 @@ class Pdm4arAgent(Agent):
         self.npc = []
         self.dvos = None
         self.dynamic = False
+        self.last_stop = None
         # TODO: remove later
         self.C0 = None
 
@@ -96,20 +98,27 @@ class Pdm4arAgent(Agent):
         self.current_state = self.player.state
         self.visited_pts.append([self.current_state.x, self.current_state.y])
 
-        if self.planner is None or self.is_path_in_collision():
-            max_iter = 2000
-            self.start_pos = Node.from_state(self.current_state)
-            self.goal_pos = Node([self.goal.goal.centroid.x, self.goal.goal.centroid.y])
-            self.replan(self.start_pos, self.goal_pos, max_iter)
-            self.stops = self.get_stops()
-            while self.stops is None:
-                print(f"[replanning] cannot find available stops!")
-                self.replan(self.start_pos, self.goal_pos, max_iter)
-                self.stops = self.get_stops() #list of node object
-
+        if self.planner is None:
+            start_pos = Node.from_state(self.current_state)
+            self.get_new_path(start_pos)
             self.dpoints, self.C0 = self.fit_turning_curve(self.stops)
+            self.last_stop = self.stops.pop(0)
             self.t_step = 0
 
+        elif self.is_path_in_collision():
+            start_pos = copy(self.stops[0])
+            # remove its topology relation, otherwise dead loop
+            start_pos.parent = None
+            start_pos.child = None
+            if not self.sampling_check_collision(start_pos, radius=0.0):
+                # TODO: resample the start point if it's inside the dvo
+                self.get_new_path(start_pos)
+                self.stops.insert(0, Node.from_state(self.current_state))
+                self.dpoints, self.C0 = self.fit_turning_curve(self.stops)
+                self.t_step = 0
+
+        # change to check only "current split", last stop -> next stop, controlled by horizon actually for now
+        # instead, further collisions will be checked by the direct segments between stops
         horizon = self.mpc_setup['n_horizon']
         is_collision = self.check_dpoints_collision(self.t_step, horizon)
         if is_collision.any():
@@ -117,7 +126,10 @@ class Pdm4arAgent(Agent):
 
         self.t_step += 1
         dpoints = self.dpoints[self.t_step:]
-
+        if self.dpoints[self.t_step].equal(self.stops[0]) or \
+                self.is_between(self.stops[0], self.dpoints[self.t_step], self.C0[0]):
+            self.last_stop = self.stops.pop(0)
+            self.C0.pop(0)
 
         # add terminate state to the end of the path when the horizon is not reached
         if len(dpoints) < self.mpc_setup['n_horizon']:
@@ -129,15 +141,31 @@ class Pdm4arAgent(Agent):
         except:
             commands = SpacecraftCommands(acc_left=0, acc_right=0)
 
-        print("-"*20, f"Command at Time Step {self.t_step}", "-"*20)
+        print("-" * 20, f"Command at Time Step {self.t_step}", "-" * 20)
         print(commands)
-        print("-"*20, "Current State", "-"*20)
+        print("-" * 20, "Current State", "-" * 20)
         print(self.current_state)
-        print(len(dpoints))
+        print("[steps to go]", len(dpoints))
 
         if self.debug:
             self.plot_state()
         return commands
+
+    def get_new_path(self, start_pos: Node, max_iter=2000):
+        """
+        replan process.
+        :param start_pos: not necessarily current pose.
+        :param max_iter:
+        :return:
+        """
+        self.start_pos = start_pos
+        self.goal_pos = Node([self.goal.goal.centroid.x, self.goal.goal.centroid.y])
+        self.replan(self.start_pos, self.goal_pos, max_iter)
+        self.stops = self.get_stops()
+        while self.stops is None:
+            print(f"[replanning] cannot find available stops!")
+            self.replan(self.start_pos, self.goal_pos, max_iter)
+            self.stops = self.get_stops()  # list of node object
 
     def check_dpoints_collision(self, start, horizon):
         """
@@ -146,10 +174,10 @@ class Pdm4arAgent(Agent):
         :param horizon: horizon for checking.
         :return:
         """
-        future_dpoints = self.dpoints[start:start+horizon]
+        future_dpoints = self.dpoints[start:start + horizon]
         is_collision = np.zeros(len(future_dpoints))
         for i, dpoint in enumerate(future_dpoints):
-            if self.sampling_check_collision(dpoint, offset=3.0, radius=1.0):
+            if self.sampling_check_collision(dpoint, offset=2.0, radius=0.2):
                 is_collision[i] = 1
         return is_collision
 
@@ -159,13 +187,13 @@ class Pdm4arAgent(Agent):
         with the closest non-collision discrete points. (so that the robot crosses dvos quickly)
         :return:
         """
-        is_collision = self.check_dpoints_collision(self.t_step, horizon=40)
+        is_collision = self.check_dpoints_collision(self.t_step, horizon=self.mpc_setup['n_horizon'])
         collision_start = np.min(np.argwhere(is_collision == 1))
-        future_collision = self.check_dpoints_collision(self.t_step+collision_start, len(self.dpoints))
+        future_collision = self.check_dpoints_collision(self.t_step + collision_start, len(self.dpoints))
         jump_start = np.argmin(future_collision)
-        new_dpoints = self.dpoints[:self.t_step]
-        new_dpoints.extend([self.dpoints[self.t_step+collision_start+jump_start]]*jump_start)
-        new_dpoints.extend(self.dpoints[self.t_step+collision_start+jump_start:])
+        new_dpoints = self.dpoints[:self.t_step + collision_start]
+        new_dpoints.extend([self.dpoints[self.t_step + collision_start + jump_start]] * jump_start)
+        new_dpoints.extend(self.dpoints[self.t_step + collision_start + jump_start:])
         self.dpoints = new_dpoints
 
     def get_dynamic_velocity_obstacle(self):
@@ -183,21 +211,21 @@ class Pdm4arAgent(Agent):
             v = np.linalg.norm([npc.state.vx, npc.state.vy])
             aa = np.arctan2(npc.state.vy, npc.state.vx) + npc.state.psi
             dx, dy = v * np.cos(aa), v * np.sin(aa)
-            new_polygons = [affinity.translate(npc.occupancy.buffer(distance = 4*s), xoff=dx*s, yoff=dy*s) for s in np.linspace(0,1,10)]
+            new_polygons = [affinity.translate(npc.occupancy.buffer(distance=5 * s), xoff=dx * s, yoff=dy * s) for s in
+                            np.linspace(0, 1, 10)]
             obs = unary_union(new_polygons)
             dvos.append(obs)
         return dvos
 
     def is_path_in_collision(self, offset=3.0):
         """
-        Get True if the simplified path is in collision with the dynamic obstacles.
-        todo: remove the passed stops along the path
+        Get True if the simplified path is in collision with the dynamic obstacles. (from the closest non-reach stop)
         :param offset: for collision checks
         :return:
         """
         if self.planner is None:
             return False
-        for start, end in zip(self.stops[1:-1], self.stops[2:]):
+        for start, end in zip(self.stops[:-1], self.stops[1:]):
             if self.planner.is_collision(start, end, offset):
                 return True
         return False
@@ -285,6 +313,14 @@ class Pdm4arAgent(Agent):
             check_point = Node([x, y])
             if self.planner.is_collision(waypoint, check_point, offset):
                 return True
+
+        # add containing checks
+        obstacles = self.planner.safe_obstacles[offset]
+        check_point = Point(waypoint.x, waypoint.y)
+        for obs in obstacles:
+            if obs.contains(check_point):
+                return True
+
         return False
 
     def resample_goal(self, candidate: Node, current_pos, offset=3.0, radius=3.0):
@@ -368,11 +404,11 @@ class Pdm4arAgent(Agent):
             dist_1, psi_1 = start.point_to(mid)
             dist_2, psi_2 = mid.point_to(end)
             turning_dist = min(turning_dist, dist_1, dist_2) / 2
-            step_size = self.bind_to_range(max(dist_1, dist_2) / 50, 0.2, 1.0)
+            step_size = self.bind_to_range(max(dist_1, dist_2) / 50, 0.2, 2.0)
 
             # discretize start/2 -> mid
             start_dist = 0 if start.equal(waypoints[0]) else dist_1 / 2
-            dpoints.extend(get_dpoints(start, start_dist, dist_1-turning_dist, step_size, psi_1))
+            dpoints.extend(get_dpoints(start, start_dist, dist_1 - turning_dist, step_size, psi_1))
 
             # discretize start/2 -> mid -> end/2
             # turning_radius is defined as positive when psi_1 < psi_2,
@@ -382,7 +418,7 @@ class Pdm4arAgent(Agent):
                 long_side = turning_dist / np.cos((np.pi - (psi_2 - psi_1)) / 2)
                 curve_origin = [mid.x - long_side * np.cos((np.pi - (psi_2 + psi_1)) / 2),
                                 mid.y + long_side * np.sin((np.pi - (psi_2 + psi_1)) / 2)]
-                C0.append(curve_origin)
+                C0.append(Node(curve_origin))
                 daa = 0.8 * step_size / turning_radius
                 for aa in np.arange(0, psi_2 - psi_1, daa):
                     dpoint = Node([curve_origin[0] + turning_radius * np.sin(psi_1 + aa),
@@ -390,7 +426,8 @@ class Pdm4arAgent(Agent):
                     dpoint.psi = psi_1 + aa
                     dpoints.append(dpoint)
             else:
-                dpoints.extend(get_dpoints(start, dist_1-turning_dist, dist_1, step_size, psi_1))
+                C0.append(mid)
+                dpoints.extend(get_dpoints(start, dist_1 - turning_dist, dist_1, step_size, psi_1))
                 dpoints.extend(get_dpoints(mid, 0, turning_dist, step_size, psi_2))
 
             # discretize mid -> end
@@ -402,7 +439,7 @@ class Pdm4arAgent(Agent):
         end_pos.psi = dpoints[-1].psi
         dpoints.append(end_pos)
 
-        return dpoints, np.array(C0).reshape(-1, 2)
+        return dpoints, C0
 
     def plot_state(self):
         # axs = plt.gca()
@@ -428,7 +465,8 @@ class Pdm4arAgent(Agent):
         axs.plot([x[0] for x in self.planner.path], [x[1] for x in self.planner.path], '-k', linewidth=1)
 
         # plot discretized path
-        axs.scatter(self.C0[:, 0], self.C0[:, 1], marker="+", s=80, c="r")
+        C0 = np.array([[c.x, c.y] for c in self.C0]).reshape(-1, 2)
+        axs.scatter(C0[:, 0], C0[:, 1], marker="+", s=80, c="r")
         axs.scatter([dp.x for dp in self.dpoints], [dp.y for dp in self.dpoints], marker=".", s=2, c="r")
 
         # plot visited points
@@ -480,4 +518,26 @@ class Pdm4arAgent(Agent):
     @staticmethod
     def bind_to_range(x, lb, ub):
         return (lb if x < lb else ub) if x < lb or x > ub else x
+
+    @staticmethod
+    def is_between(a, b, c):
+        """
+        ref: https://stackoverflow.com/questions/328107/how-can-you-determine-a-point-is-between-two-other-points-on
+        -a-line-segment
+        """
+        crossproduct = (c.y - a.y) * (b.x - a.x) - (c.x - a.x) * (b.y - a.y)
+
+        # compare versus epsilon for floating point values, or != 0 if using integers
+        if abs(crossproduct) > 1e-10:
+            return False
+
+        dotproduct = (c.x - a.x) * (b.x - a.x) + (c.y - a.y) * (b.y - a.y)
+        if dotproduct < 0:
+            return False
+
+        squaredlengthba = (b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y)
+        if dotproduct > squaredlengthba:
+            return False
+
+        return True
 
