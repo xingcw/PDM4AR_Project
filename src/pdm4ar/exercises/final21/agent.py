@@ -1,5 +1,6 @@
 from typing import Sequence, List
 from copy import copy
+import os
 import yaml
 import numpy as np
 import matplotlib
@@ -33,7 +34,7 @@ class Pdm4arAgent(Agent):
         self.static_obstacles = static_obstacles
         self.sg = sg
         self.sp = sp
-        self.config = self.get_config("exercises/final21/config.yaml")
+        self.config = self.get_config(os.path.join(os.path.dirname(__file__), "config.yaml"))
         self.planner = None
         self.current_state = None
         self.start_pos = None
