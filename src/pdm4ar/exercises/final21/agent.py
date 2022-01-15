@@ -64,6 +64,7 @@ class Pdm4arAgent(Agent):
         self.player = None
         self.npc = []
         self.dvos = None
+        self.dvo_num_collision = None
         self.dynamic = False
         self.last_stop = None
         # TODO: remove later
@@ -90,6 +91,8 @@ class Pdm4arAgent(Agent):
             for npc in all_names:
                 self.npc.append(sim_obs.players[npc])
             self.dvos = self.get_dynamic_velocity_obstacle()
+            if self.dvo_num_collision is None:
+                self.dvo_num_collision = [0] * len(self.dvos)
 
         if self.dynamic and self.planner is not None:
             self.planner.update_npc(self.dvos)
@@ -117,7 +120,7 @@ class Pdm4arAgent(Agent):
                 # TODO: resample the start point if it's inside the dvo
                 self.get_new_path(start_pos)
                 self.stops.insert(0, Node.from_state(self.current_state))
-                if not self.planner.s_start.equal(fixed_stop) and not self.sampling_check_collision(fixed_stop, radius=0.0):
+                if not self.planner.s_start.equal(fixed_stop) and not self.sampling_check_collision(fixed_stop, radius=3.0):
                     self.stops.insert(1, fixed_stop)
                 self.dpoints, self.C0 = self.fit_turning_curve(self.stops)
                 self.last_stop = self.stops.pop(0)
@@ -323,11 +326,12 @@ class Pdm4arAgent(Agent):
                 return True
 
         # add containing checks
-        obstacles = self.planner.safe_obstacles[offset]
-        check_point = Point(waypoint.x, waypoint.y)
-        for obs in obstacles:
-            if obs.contains(check_point):
-                return True
+        if self.dynamic:
+            obstacles = self.planner.safe_obstacles[offset]["dynamic"]
+            check_point = Point(waypoint.x, waypoint.y)
+            for obs in obstacles:
+                if obs.contains(check_point):
+                    return True
 
         return False
 
@@ -466,8 +470,11 @@ class Pdm4arAgent(Agent):
         axs.set_aspect("equal")
 
         # plot safe boundary of obstacles
-        for safe_s_obstacle in self.planner.safe_obstacles[self.planner.offset]:
+        for safe_s_obstacle in self.planner.safe_obstacles[self.planner.offset]["static"]:
             axs.plot(*safe_s_obstacle.exterior.xy)
+        if self.dynamic:
+            for safe_s_obstacle in self.planner.safe_obstacles[self.planner.offset]["dynamic"]:
+                axs.plot(*safe_s_obstacle.exterior.xy)
 
         # plot planned path
         axs.plot([[s.x, s.y] for s in self.stops], '-k', linewidth=1)
