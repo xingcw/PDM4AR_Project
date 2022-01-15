@@ -1,5 +1,6 @@
 from typing import Sequence, List
 from copy import copy
+import yaml
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
@@ -35,7 +36,7 @@ class Pdm4arAgent(Agent):
         self.static_obstacles = static_obstacles
         self.sg = sg
         self.sp = sp
-        self.debug = True
+        self.config = self.get_config("exercises/final21/config.yaml")
         self.planner = None
         self.current_state = None
         self.start_pos = None
@@ -44,21 +45,7 @@ class Pdm4arAgent(Agent):
         self.dpoints = []
         self.stops = []
         self.visited_pts = []
-        # ======mpc setup=========
-        self.mpc_setup = {
-            'n_horizon': 50,
-            't_step': 0.1,
-            'n_robust': 0,
-            'store_full_solution': False,
-        }
-        mpc_cost_coef = {
-            'pos': 5,
-            'angular_vel': 3,
-            'linear_vel': 3,
-            'regularization': 1e-2
-        }
-        self.controller = MPCController(self.sg, self.mpc_setup, opt_interval=2, cost_func_coef=mpc_cost_coef)
-        # TODO: get rid of time stamp
+        self.controller = MPCController(self.sg, self.config['controller'])
         self.t_step = 0
         self.name = None
         self.player = None
@@ -69,6 +56,15 @@ class Pdm4arAgent(Agent):
         self.last_stop = None
         # TODO: remove later
         self.C0 = None
+
+    @staticmethod
+    def get_config(file_path: str):
+        with open(file_path, "r") as stream:
+            try:
+                config = yaml.safe_load(stream)
+            except yaml.YAMLError as exc:
+                print(exc)
+        return config
 
     def on_episode_init(self, my_name: PlayerName):
         self.name = my_name
@@ -128,7 +124,7 @@ class Pdm4arAgent(Agent):
 
         # change to check only "current split", last stop -> next stop, controlled by horizon actually for now
         # instead, further collisions will be checked by the direct segments between stops
-        horizon = self.mpc_setup['n_horizon']
+        horizon = self.config['controller']['setup']['n_horizon']
         is_collision = self.check_dpoints_collision(self.t_step, horizon)
         if is_collision.any():
             self.resample_dpoints()
@@ -140,7 +136,7 @@ class Pdm4arAgent(Agent):
             self.C0.pop(0)
 
         # add terminate state to the end of the path when the horizon is not reached
-        if len(dpoints) < self.mpc_setup['n_horizon']:
+        if len(dpoints) < horizon:
             self.dpoints.append(self.dpoints[-1])
             dpoints.append(self.dpoints[-1])
         try:
@@ -156,7 +152,7 @@ class Pdm4arAgent(Agent):
         print("[steps to go]", len(dpoints))
         print("[passed time]", len(self.visited_pts))
 
-        if self.debug:
+        if self.config['algo']['debug']:
             self.plot_state()
         return commands
 
@@ -204,12 +200,13 @@ class Pdm4arAgent(Agent):
         with the closest non-collision discrete points. (so that the robot crosses dvos quickly)
         :return:
         """
-        is_collision = self.check_dpoints_collision(self.t_step, horizon=self.mpc_setup['n_horizon'])
+        is_collision = self.check_dpoints_collision(self.t_step, horizon=self.config['controller']['setup']['n_horizon'])
         collision_start = np.min(np.argwhere(is_collision == 1))
         future_collision = self.check_dpoints_collision(self.t_step + collision_start, len(self.dpoints))
         jump_start = np.argmin(future_collision)
         new_dpoints = self.dpoints[:self.t_step + collision_start]
-        new_dpoints.extend([self.dpoints[self.t_step + collision_start + jump_start]] * np.min([jump_start, 10]))
+        num_wait = self.config['algo']['max_num_wait_dpoints']
+        new_dpoints.extend([self.dpoints[self.t_step + collision_start + jump_start]] * np.min([jump_start, num_wait]))
         new_dpoints.extend(self.dpoints[self.t_step + collision_start + jump_start:])
         self.dpoints = new_dpoints
 
@@ -228,7 +225,8 @@ class Pdm4arAgent(Agent):
             v = np.linalg.norm([npc.state.vx, npc.state.vy])
             aa = np.arctan2(npc.state.vy, npc.state.vx) + npc.state.psi
             # adaptive dvo
-            scale = 1 / (1.0 + self.dvo_num_collision[i] / 5)
+            max_num_collision = self.config['algo']['max_num_collision']
+            scale = 1 / (1.0 + self.dvo_num_collision[i] / max_num_collision)
             dx, dy = v * np.cos(aa) * scale, v * np.sin(aa) * scale
             new_polygons = [affinity.translate(npc.occupancy.buffer(distance=5 * scale * s), xoff=dx * s, yoff=dy * s)
                             for s in np.linspace(0, 1, 10)]

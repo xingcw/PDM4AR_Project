@@ -7,14 +7,14 @@ from pdm4ar.exercises.final21.RRT_star import Node
 
 
 class MPCController(object):
-    def __init__(self, sg: SpacecraftGeometry,  mpc_setup: dict,**kwargs):
+    def __init__(self, sg: SpacecraftGeometry, config: dict):
         # either 'discrete' or 'continuous'
         self.sg = sg
-        self.mpc_setup = mpc_setup
-        self.initialized = False
-        self.opt_interval = kwargs['opt_interval']
+        self.mpc_setup = config['setup']
+        self.initialized = config['initialize']
+        self.opt_interval = config['opt_interval']
         self.count = 0
-        self.cost_func_coef = kwargs['cost_func_coef']
+        self.cost_func_coef = config['cost_func_coeff']
 
     def initialization(self, path):
         sg = self.sg
@@ -62,10 +62,12 @@ class MPCController(object):
         # objective setup
         # TODO: tuning Q, R weights
 
-        mterm = self.cost_func_coef['pos'] * ((x - x_gt) ** 2 + (y - y_gt) ** 2) +\
-                self.cost_func_coef['angular_vel'] * (psi - psi_gt)**2 + self.cost_func_coef['linear_vel'] * (vy - vy_gt) ** 2
-        lterm = self.cost_func_coef['pos'] * ((x - x_gt) ** 2 + (y - y_gt) ** 2 )+ \
-                self.cost_func_coef['angular_vel']  * (psi - psi_gt)**2 + self.cost_func_coef['linear_vel']  * (vy - vy_gt) ** 2
+        mterm = self.cost_func_coef['pos'] * ((x - x_gt) ** 2 + (y - y_gt) ** 2) + \
+                self.cost_func_coef['angular_vel'] * (psi - psi_gt) ** 2 + self.cost_func_coef['linear_vel'] * (
+                            vy - vy_gt) ** 2
+        lterm = self.cost_func_coef['pos'] * ((x - x_gt) ** 2 + (y - y_gt) ** 2) + \
+                self.cost_func_coef['angular_vel'] * (psi - psi_gt) ** 2 + self.cost_func_coef['linear_vel'] * (
+                            vy - vy_gt) ** 2
 
         mpc.set_objective(mterm=mterm, lterm=lterm)
         mpc.set_rterm(
@@ -97,11 +99,8 @@ class MPCController(object):
         self.mpc.set_initial_guess()
         self.initialized = True
 
-
-
     def print_state(self):
         return self.model.x.labels()
-
 
     def mpc_command(self, state, planned_seq):
         if self.initialized:

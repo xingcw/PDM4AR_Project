@@ -1,0 +1,23 @@
+controller:
+    setup:
+        n_horizon: 50
+        t_step: 0.1
+        n_robust: 0
+        store_full_solution: false
+    opt_interval: 2
+    initialize: false
+    cost_func_coeff:
+        pos: 5
+        angular_vel: 3
+        linear_vel: 3
+        regularization: 1.0e-2
+
+algo:
+    debug: true
+    # when resample dpoints
+    max_num_wait_dpoints: 10
+
+    # adaptive dvo
+    max_num_collision: 5
+
+
