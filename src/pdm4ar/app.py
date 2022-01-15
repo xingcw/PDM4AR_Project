@@ -46,18 +46,23 @@ def exercise_without_compmake(exercise: str):
     assert src_folder in repo_dir, repo_dir
     repo_dir = re.split(src_folder, repo_dir)[0]
     assert os.path.isdir(repo_dir)
-    out = os.path.join(repo_dir, "out")
+    out = os.path.join(repo_dir, "out/new_tests")
+    if not os.path.exists(out):
+        os.makedirs(out)
 
     ex = available_exercises[exercise]()
+    ep_evals = []
     for i, alg_in in enumerate(ex.test_values):
         try:
             i_str = alg_in.str_id() + str(i)
         except:
             i_str = str(i)
         alg_out = ex.algorithm(alg_in)
-        report = ex.report(alg_in, alg_out)
+        report, ep_eval = ex.report(alg_in, alg_out)
+        ep_evals.append(ep_eval)
         report_file = os.path.join(out, f"{exercise}-{i_str}.html")
         report.to_html(report_file)
+    return ep_evals
 
 
 exercise_main = Pdm4arExercise.get_sys_main()

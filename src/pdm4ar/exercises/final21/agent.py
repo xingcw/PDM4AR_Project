@@ -1,5 +1,6 @@
 from typing import Sequence, List
 from copy import copy
+import yaml
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
@@ -17,9 +18,6 @@ from dg_commons.sim.models.spacecraft_structures import SpacecraftGeometry
 from pdm4ar.exercises.final21.RRT_star import RrtStar, Node
 from pdm4ar.exercises.final21.Controller import MPCController
 
-A_MAX = 10
-matplotlib.use('TkAgg')
-
 
 class Pdm4arAgent(Agent):
     """This is the PDM4AR agent.
@@ -35,7 +33,7 @@ class Pdm4arAgent(Agent):
         self.static_obstacles = static_obstacles
         self.sg = sg
         self.sp = sp
-        self.debug = True
+        self.config = self.get_config("exercises/final21/config.yaml")
         self.planner = None
         self.current_state = None
         self.start_pos = None
@@ -44,30 +42,26 @@ class Pdm4arAgent(Agent):
         self.dpoints = []
         self.stops = []
         self.visited_pts = []
-        # ======mpc setup=========
-        self.mpc_setup = {
-            'n_horizon': 50,
-            't_step': 0.1,
-            'n_robust': 0,
-            'store_full_solution': False,
-        }
-        mpc_cost_coef = {
-            'pos': 5,
-            'angular_vel': 3,
-            'linear_vel': 3,
-            'regularization': 1e-2
-        }
-        self.controller = MPCController(self.sg, self.mpc_setup, opt_interval=2, cost_func_coef=mpc_cost_coef)
-        # TODO: get rid of time stamp
+        self.controller = MPCController(self.sg, self.config['controller'])
         self.t_step = 0
         self.name = None
         self.player = None
         self.npc = []
         self.dvos = None
+        self.dvo_num_collision = None
         self.dynamic = False
         self.last_stop = None
         # TODO: remove later
         self.C0 = None
+
+    @staticmethod
+    def get_config(file_path: str):
+        with open(file_path, "r") as stream:
+            try:
+                config = yaml.safe_load(stream)
+            except yaml.YAMLError as exc:
+                print(exc)
+        return config
 
     def on_episode_init(self, my_name: PlayerName):
         self.name = my_name
@@ -87,8 +81,10 @@ class Pdm4arAgent(Agent):
             all_names = list(sim_obs.players.keys())
             all_names.remove(self.name)
             self.npc = []
-            for npc in all_names:
+            for npc in sorted(all_names):
                 self.npc.append(sim_obs.players[npc])
+            if self.dvo_num_collision is None:
+                self.dvo_num_collision = [0] * len(self.npc)
             self.dvos = self.get_dynamic_velocity_obstacle()
 
         if self.dynamic and self.planner is not None:
@@ -106,7 +102,10 @@ class Pdm4arAgent(Agent):
             self.t_step = 0
 
         elif self.is_path_in_collision():
+            # next stop saved, in case resampling
+            fixed_stop = copy(self.stops[0])
             start_pos = copy(self.stops[0])
+
             # remove its topology relation, otherwise dead loop
             start_pos.parent = None
             start_pos.child = None
@@ -114,25 +113,27 @@ class Pdm4arAgent(Agent):
                 # TODO: resample the start point if it's inside the dvo
                 self.get_new_path(start_pos)
                 self.stops.insert(0, Node.from_state(self.current_state))
+                if not self.planner.s_start.equal(fixed_stop) and not self.sampling_check_collision(fixed_stop, radius=3.0):
+                    self.stops.insert(1, fixed_stop)
                 self.dpoints, self.C0 = self.fit_turning_curve(self.stops)
+                self.last_stop = self.stops.pop(0)
                 self.t_step = 0
 
         # change to check only "current split", last stop -> next stop, controlled by horizon actually for now
         # instead, further collisions will be checked by the direct segments between stops
-        horizon = self.mpc_setup['n_horizon']
+        horizon = self.config['controller']['setup']['n_horizon']
         is_collision = self.check_dpoints_collision(self.t_step, horizon)
         if is_collision.any():
             self.resample_dpoints()
 
         self.t_step += 1
         dpoints = self.dpoints[self.t_step:]
-        if self.dpoints[self.t_step].equal(self.stops[0]) or \
-                self.is_between(self.stops[0], self.dpoints[self.t_step], self.C0[0]):
+        if self.reach_stop():
             self.last_stop = self.stops.pop(0)
             self.C0.pop(0)
 
         # add terminate state to the end of the path when the horizon is not reached
-        if len(dpoints) < self.mpc_setup['n_horizon']:
+        if len(dpoints) < horizon:
             self.dpoints.append(self.dpoints[-1])
             dpoints.append(self.dpoints[-1])
         try:
@@ -146,10 +147,20 @@ class Pdm4arAgent(Agent):
         print("-" * 20, "Current State", "-" * 20)
         print(self.current_state)
         print("[steps to go]", len(dpoints))
+        print("[passed time]", len(self.visited_pts))
 
-        if self.debug:
+        if self.config['algo']['debug']:
+            matplotlib.use('TkAgg')
             self.plot_state()
         return commands
+
+    def reach_stop(self):
+        if self.dpoints[self.t_step].equal(self.stops[0]):
+            return True
+        if self.is_between(self.stops[0], self.C0[0], self.dpoints[self.t_step]):
+            return True
+        dist, _ = self.stops[0].point_to(Node.from_state(self.current_state))
+        return True if dist < 5 else False
 
     def get_new_path(self, start_pos: Node, max_iter=2000):
         """
@@ -187,12 +198,13 @@ class Pdm4arAgent(Agent):
         with the closest non-collision discrete points. (so that the robot crosses dvos quickly)
         :return:
         """
-        is_collision = self.check_dpoints_collision(self.t_step, horizon=self.mpc_setup['n_horizon'])
+        is_collision = self.check_dpoints_collision(self.t_step, horizon=self.config['controller']['setup']['n_horizon'])
         collision_start = np.min(np.argwhere(is_collision == 1))
         future_collision = self.check_dpoints_collision(self.t_step + collision_start, len(self.dpoints))
         jump_start = np.argmin(future_collision)
         new_dpoints = self.dpoints[:self.t_step + collision_start]
-        new_dpoints.extend([self.dpoints[self.t_step + collision_start + jump_start]] * jump_start)
+        num_wait = self.config['algo']['max_num_wait_dpoints']
+        new_dpoints.extend([self.dpoints[self.t_step + collision_start + jump_start]] * np.min([jump_start, num_wait]))
         new_dpoints.extend(self.dpoints[self.t_step + collision_start + jump_start:])
         self.dpoints = new_dpoints
 
@@ -206,27 +218,32 @@ class Pdm4arAgent(Agent):
         from shapely import affinity
         from shapely.ops import unary_union
         dvos = []
-        for npc in self.npc:
+        for i, npc in enumerate(self.npc):
             oriented_bounding_box = npc.occupancy.minimum_rotated_rectangle
             v = np.linalg.norm([npc.state.vx, npc.state.vy])
             aa = np.arctan2(npc.state.vy, npc.state.vx) + npc.state.psi
-            dx, dy = v * np.cos(aa), v * np.sin(aa)
-            new_polygons = [affinity.translate(npc.occupancy.buffer(distance=5 * s), xoff=dx * s, yoff=dy * s) for s in
-                            np.linspace(0, 1, 10)]
+            # adaptive dvo
+            max_num_collision = self.config['algo']['max_num_collision']
+            scale = 1 / (1.0 + self.dvo_num_collision[i] / max_num_collision)
+            dx, dy = v * np.cos(aa) * scale, v * np.sin(aa) * scale
+            new_polygons = [affinity.translate(npc.occupancy.buffer(distance=5 * scale * s), xoff=dx * s, yoff=dy * s)
+                            for s in np.linspace(0, 1, 10)]
             obs = unary_union(new_polygons)
             dvos.append(obs)
         return dvos
 
-    def is_path_in_collision(self, offset=3.0):
+    def is_path_in_collision(self, offset=3.0, replan_horizon=3):
         """
         Get True if the simplified path is in collision with the dynamic obstacles. (from the closest non-reach stop)
+        :param replan_horizon: check only closest splits of path to save computation time
         :param offset: for collision checks
         :return:
         """
         if self.planner is None:
             return False
-        for start, end in zip(self.stops[:-1], self.stops[1:]):
+        for start, end in zip(self.stops[:replan_horizon], self.stops[1:replan_horizon+1]):
             if self.planner.is_collision(start, end, offset):
+                self.dvo_num_collision[self.planner.collision_dvo_id] += 1
                 return True
         return False
 
@@ -315,11 +332,12 @@ class Pdm4arAgent(Agent):
                 return True
 
         # add containing checks
-        obstacles = self.planner.safe_obstacles[offset]
-        check_point = Point(waypoint.x, waypoint.y)
-        for obs in obstacles:
-            if obs.contains(check_point):
-                return True
+        if self.dynamic:
+            obstacles = self.planner.safe_obstacles[offset]["dynamic"]
+            check_point = Point(waypoint.x, waypoint.y)
+            for obs in obstacles:
+                if obs.contains(check_point):
+                    return True
 
         return False
 
@@ -404,7 +422,9 @@ class Pdm4arAgent(Agent):
             dist_1, psi_1 = start.point_to(mid)
             dist_2, psi_2 = mid.point_to(end)
             turning_dist = min(turning_dist, dist_1, dist_2) / 2
-            step_size = self.bind_to_range(max(dist_1, dist_2) / 50, 0.2, 2.0)
+            min_step_size = self.config['algo']['min_step_size']
+            max_step_size = self.config['algo']['max_step_size']
+            step_size = self.bind_to_range(max(dist_1, dist_2) / 50, min_step_size, max_step_size)
 
             # discretize start/2 -> mid
             start_dist = 0 if start.equal(waypoints[0]) else dist_1 / 2
@@ -438,6 +458,7 @@ class Pdm4arAgent(Agent):
         end_pos = self.goal_pos
         end_pos.psi = dpoints[-1].psi
         dpoints.append(end_pos)
+        C0.append(end_pos)
 
         return dpoints, C0
 
@@ -458,11 +479,14 @@ class Pdm4arAgent(Agent):
         axs.set_aspect("equal")
 
         # plot safe boundary of obstacles
-        for safe_s_obstacle in self.planner.safe_obstacles[self.planner.offset]:
+        for safe_s_obstacle in self.planner.safe_obstacles[self.planner.offset]["static"]:
             axs.plot(*safe_s_obstacle.exterior.xy)
+        if self.dynamic:
+            for safe_s_obstacle in self.planner.safe_obstacles[self.planner.offset]["dynamic"]:
+                axs.plot(*safe_s_obstacle.exterior.xy)
 
         # plot planned path
-        axs.plot([x[0] for x in self.planner.path], [x[1] for x in self.planner.path], '-k', linewidth=1)
+        axs.plot([s.x for s in self.stops], [s.y for s in self.stops], '-k', linewidth=1)
 
         # plot discretized path
         C0 = np.array([[c.x, c.y] for c in self.C0]).reshape(-1, 2)
@@ -520,24 +544,15 @@ class Pdm4arAgent(Agent):
         return (lb if x < lb else ub) if x < lb or x > ub else x
 
     @staticmethod
-    def is_between(a, b, c):
+    def is_between(a: Node, b: Node, c: Node):
         """
         ref: https://stackoverflow.com/questions/328107/how-can-you-determine-a-point-is-between-two-other-points-on
         -a-line-segment
         """
-        crossproduct = (c.y - a.y) * (b.x - a.x) - (c.x - a.x) * (b.y - a.y)
-
-        # compare versus epsilon for floating point values, or != 0 if using integers
-        if abs(crossproduct) > 1e-10:
-            return False
-
-        dotproduct = (c.x - a.x) * (b.x - a.x) + (c.y - a.y) * (b.y - a.y)
-        if dotproduct < 0:
-            return False
-
-        squaredlengthba = (b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y)
-        if dotproduct > squaredlengthba:
-            return False
-
-        return True
+        dot_product = (c.x - a.x) * (b.x - a.x) + (c.y - a.y) * (b.y - a.y)
+        ab, _ = a.point_to(b)
+        ac, _ = a.point_to(c)
+        angle = np.arccos(dot_product / (ab * ac + 1e-16))
+        print(f"[reach stop check] angle: {angle}")
+        return True if angle < 0.5 else False
 

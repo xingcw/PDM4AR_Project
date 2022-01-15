@@ -6,6 +6,7 @@ RRT_star 2D
 import math
 import numpy as np
 import collections
+from copy import copy
 from typing import Sequence, Optional, List
 from dg_commons.sim.models.obstacles import StaticObstacle
 from dg_commons.sim.models.spacecraft import SpacecraftState
@@ -66,7 +67,8 @@ class Node:
 
 
 class RrtStar:
-    def __init__(self, x_start, x_goal, static_obstacles: Sequence[StaticObstacle], dynamic_obstacles=None, visualize=False,
+    def __init__(self, x_start, x_goal, static_obstacles: Sequence[StaticObstacle], dynamic_obstacles=None,
+                 visualize=False,
                  step_len=10, goal_sample_rate=0.1, search_radius=20, iter_max=2000, safe_offset=3.0, safe_boarder=3.0):
         self.s_start = x_start
         self.s_goal = x_goal
@@ -80,61 +82,99 @@ class RrtStar:
         self.path = []
         self.static_obstacles = static_obstacles
         self.dynamic_obstacles = dynamic_obstacles
+        self.dynamic = True if dynamic_obstacles is not None else False
+        self.collision_dvo_id = 0
         self.offset = safe_offset
         self.safe_boarder = safe_boarder
         # environment boarder
         env = self.static_obstacles[0].shape
         self.x_range = [env.bounds[0], env.bounds[2]]
         self.y_range = [env.bounds[1], env.bounds[3]]
-        self.safe_obstacles = {0.0: self.get_safe_obstacles(0.0),
-                               2.0: self.get_safe_obstacles(2.0),
-                               3.0: self.get_safe_obstacles(3.0)}
+        self.safe_s_obs = {0.0: self.get_safe_s_obs(0.0),
+                           2.0: self.get_safe_s_obs(2.0),
+                           3.0: self.get_safe_s_obs(3.0)}
+        self.safe_d_obs = {0.0: self.get_safe_d_obs(0.0),
+                           2.0: self.get_safe_d_obs(2.0),
+                           3.0: self.get_safe_d_obs(3.0)}
+        self.safe_obstacles = self.combine_s_d()
 
     def update_npc(self, obstacle):
         self.dynamic_obstacles = obstacle if isinstance(obstacle, list) else [obstacle]
-        self.safe_obstacles = {0.0: self.get_safe_obstacles(0.0),
-                               2.0: self.get_safe_obstacles(2.0),
-                               3.0: self.get_safe_obstacles(3.0)}
+        self.safe_d_obs = {0.0: self.get_safe_d_obs(0.0),
+                           2.0: self.get_safe_d_obs(2.0),
+                           3.0: self.get_safe_d_obs(3.0)}
+        self.safe_obstacles = {}
+        self.safe_obstacles = self.combine_s_d()
+
+    def combine_s_d(self):
+        safe_obstacles = {}
+        for s_offset, s_obs in self.safe_s_obs.items():
+            safe_obstacles.update({s_offset: {"static": s_obs}})
+            if self.dynamic:
+                if s_offset in self.safe_d_obs.keys():
+                    safe_obstacles.update({s_offset: {"static": s_obs, "dynamic": self.safe_d_obs[s_offset]}})
+        return safe_obstacles
+
+    def update_safe_obstacles(self, offset):
+        svo = self.get_safe_s_obs(offset)
+        self.safe_obstacles.update({offset: {"static": svo}})
+        if self.dynamic:
+            dvo = self.get_safe_d_obs(offset)
+            self.safe_obstacles.update({offset: {"static": svo, "dynamic": dvo}})
 
     def get_safe_env_bound(self, offset=3.0):
         x_range = [self.x_range[0] + offset, self.x_range[1] - offset]
         y_range = [self.y_range[0] + offset, self.y_range[1] - offset]
         return x_range, y_range
 
-    def get_safe_obstacles(self, offset=2.0):
-        safe_obstacles = []
+    def get_safe_s_obs(self, offset=2.0):
+        safe_s_obs = []
         if offset:
             for s_obstacle in self.static_obstacles[1:]:
                 safe_boundary = s_obstacle.shape.buffer(offset, resolution=16, join_style=2, mitre_limit=1)
-                safe_obstacles.append(safe_boundary)
+                safe_s_obs.append(safe_boundary)
+        else:
+            safe_s_obs = self.static_obstacles[1:]
+        return safe_s_obs
+
+    def get_safe_d_obs(self, offset=2.0):
+        safe_d_obs = []
+        if offset:
             if self.dynamic_obstacles is not None:
                 for d_obs in self.dynamic_obstacles:
                     safe_boundary = d_obs.buffer(offset, resolution=16, join_style=2, mitre_limit=1)
-                    safe_obstacles.append(safe_boundary)
+                    safe_d_obs.append(safe_boundary)
         else:
-            safe_obstacles = self.static_obstacles[1:]
             if self.dynamic_obstacles is not None:
                 for d_obs in self.dynamic_obstacles:
-                    safe_obstacles.append(d_obs)
-        return safe_obstacles
+                    safe_d_obs.append(d_obs)
+        return safe_d_obs
 
     def is_collision(self, node_near, node_new, offset=None):
         if offset is not None:
             if offset not in self.safe_obstacles.keys():
-                self.safe_obstacles.update({offset: self.get_safe_obstacles(offset)})
+                self.update_safe_obstacles(offset)
         else:
-            if self.offset not in self.safe_obstacles.keys():
-                self.safe_obstacles.update({self.offset: self.get_safe_obstacles(self.offset)})
             offset = self.offset
+            if offset not in self.safe_obstacles.keys():
+                self.update_safe_obstacles(offset)
+
+        safe_obstacles = copy(self.safe_obstacles[offset]["static"])
+        path = LineString([(node_near.x, node_near.y), (node_new.x, node_new.y)])
+
         if offset:
-            for s_obstacle in self.safe_obstacles[offset]:
-                path = LineString([(node_near.x, node_near.y), (node_new.x, node_new.y)])
+            for s_obstacle in safe_obstacles:
                 if path.intersects(s_obstacle.exterior):
                     return True
         else:
-            for s_obstacle in self.safe_obstacles[offset]:
-                path = LineString([(node_near.x, node_near.y), (node_new.x, node_new.y)])
+            for s_obstacle in safe_obstacles:
                 if path.intersects(s_obstacle.shape.convex_hull.exterior):
+                    return True
+
+        if self.dynamic:
+            for i, dvo in enumerate(self.safe_obstacles[offset]["dynamic"]):
+                if path.intersects(dvo.exterior):
+                    self.collision_dvo_id = i
                     return True
         return False
 
