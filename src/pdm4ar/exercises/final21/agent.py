@@ -88,11 +88,11 @@ class Pdm4arAgent(Agent):
             all_names = list(sim_obs.players.keys())
             all_names.remove(self.name)
             self.npc = []
-            for npc in all_names:
+            for npc in sorted(all_names):
                 self.npc.append(sim_obs.players[npc])
-            self.dvos = self.get_dynamic_velocity_obstacle()
             if self.dvo_num_collision is None:
-                self.dvo_num_collision = [0] * len(self.dvos)
+                self.dvo_num_collision = [0] * len(self.npc)
+            self.dvos = self.get_dynamic_velocity_obstacle()
 
         if self.dynamic and self.planner is not None:
             self.planner.update_npc(self.dvos)
@@ -216,13 +216,15 @@ class Pdm4arAgent(Agent):
         from shapely import affinity
         from shapely.ops import unary_union
         dvos = []
-        for npc in self.npc:
+        for i, npc in enumerate(self.npc):
             oriented_bounding_box = npc.occupancy.minimum_rotated_rectangle
             v = np.linalg.norm([npc.state.vx, npc.state.vy])
             aa = np.arctan2(npc.state.vy, npc.state.vx) + npc.state.psi
-            dx, dy = v * np.cos(aa), v * np.sin(aa)
-            new_polygons = [affinity.translate(npc.occupancy.buffer(distance=5 * s), xoff=dx * s, yoff=dy * s) for s in
-                            np.linspace(0, 1, 10)]
+            # adaptive dvo
+            scale = 1 / (1.0 + self.dvo_num_collision[i] / 5)
+            dx, dy = v * np.cos(aa) * scale, v * np.sin(aa) * scale
+            new_polygons = [affinity.translate(npc.occupancy.buffer(distance=5 * scale * s), xoff=dx * s, yoff=dy * s)
+                            for s in np.linspace(0, 1, 10)]
             obs = unary_union(new_polygons)
             dvos.append(obs)
         return dvos
@@ -238,6 +240,7 @@ class Pdm4arAgent(Agent):
             return False
         for start, end in zip(self.stops[:replan_horizon], self.stops[1:replan_horizon+1]):
             if self.planner.is_collision(start, end, offset):
+                self.dvo_num_collision[self.planner.collision_dvo_id] += 1
                 return True
         return False
 
@@ -450,6 +453,7 @@ class Pdm4arAgent(Agent):
         end_pos = self.goal_pos
         end_pos.psi = dpoints[-1].psi
         dpoints.append(end_pos)
+        C0.append(end_pos)
 
         return dpoints, C0
 

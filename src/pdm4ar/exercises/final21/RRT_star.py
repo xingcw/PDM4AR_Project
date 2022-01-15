@@ -83,6 +83,7 @@ class RrtStar:
         self.static_obstacles = static_obstacles
         self.dynamic_obstacles = dynamic_obstacles
         self.dynamic = True if dynamic_obstacles is not None else False
+        self.collision_dvo_id = 0
         self.offset = safe_offset
         self.safe_boarder = safe_boarder
         # environment boarder
@@ -158,21 +159,22 @@ class RrtStar:
             if offset not in self.safe_obstacles.keys():
                 self.update_safe_obstacles(offset)
 
-        if self.dynamic:
-            safe_obstacles = copy(self.safe_obstacles[offset]["static"])
-            safe_obstacles.extend(self.safe_obstacles[offset]["dynamic"])
-        else:
-            safe_obstacles = copy(self.safe_obstacles[offset]["static"])
+        safe_obstacles = copy(self.safe_obstacles[offset]["static"])
+        path = LineString([(node_near.x, node_near.y), (node_new.x, node_new.y)])
 
         if offset:
             for s_obstacle in safe_obstacles:
-                path = LineString([(node_near.x, node_near.y), (node_new.x, node_new.y)])
                 if path.intersects(s_obstacle.exterior):
                     return True
         else:
             for s_obstacle in safe_obstacles:
-                path = LineString([(node_near.x, node_near.y), (node_new.x, node_new.y)])
                 if path.intersects(s_obstacle.shape.convex_hull.exterior):
+                    return True
+
+        if self.dynamic:
+            for i, dvo in enumerate(self.safe_obstacles[offset]["dynamic"]):
+                if path.intersects(dvo.exterior):
+                    self.collision_dvo_id = i
                     return True
         return False
 
