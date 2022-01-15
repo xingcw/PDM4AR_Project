@@ -488,7 +488,7 @@ class Pdm4arAgent(Agent):
                 axs.plot(*safe_s_obstacle.exterior.xy)
 
         # plot planned path
-        axs.plot([[s.x, s.y] for s in self.stops], '-k', linewidth=1)
+        axs.plot([s.x for s in self.stops], [s.y for s in self.stops], '-k', linewidth=1)
 
         # plot discretized path
         C0 = np.array([[c.x, c.y] for c in self.C0]).reshape(-1, 2)
