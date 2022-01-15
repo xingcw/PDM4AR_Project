@@ -35,7 +35,7 @@ class Pdm4arAgent(Agent):
         self.static_obstacles = static_obstacles
         self.sg = sg
         self.sp = sp
-        self.debug = False
+        self.debug = True
         self.planner = None
         self.current_state = None
         self.start_pos = None
@@ -106,7 +106,10 @@ class Pdm4arAgent(Agent):
             self.t_step = 0
 
         elif self.is_path_in_collision():
+            # next stop saved, in case resampling
+            fixed_stop = copy(self.stops[0])
             start_pos = copy(self.stops[0])
+
             # remove its topology relation, otherwise dead loop
             start_pos.parent = None
             start_pos.child = None
@@ -114,7 +117,10 @@ class Pdm4arAgent(Agent):
                 # TODO: resample the start point if it's inside the dvo
                 self.get_new_path(start_pos)
                 self.stops.insert(0, Node.from_state(self.current_state))
+                if not self.planner.s_start.equal(fixed_stop):
+                    self.stops.insert(1, fixed_stop)
                 self.dpoints, self.C0 = self.fit_turning_curve(self.stops)
+                self.last_stop = self.stops.pop(0)
                 self.t_step = 0
 
         # change to check only "current split", last stop -> next stop, controlled by horizon actually for now
@@ -127,7 +133,7 @@ class Pdm4arAgent(Agent):
         self.t_step += 1
         dpoints = self.dpoints[self.t_step:]
         if self.dpoints[self.t_step].equal(self.stops[0]) or \
-                self.is_between(self.stops[0], self.dpoints[self.t_step], self.C0[0]):
+                self.is_between(self.stops[0], self.C0[0], self.dpoints[self.t_step]):
             self.last_stop = self.stops.pop(0)
             self.C0.pop(0)
 
@@ -146,6 +152,7 @@ class Pdm4arAgent(Agent):
         print("-" * 20, "Current State", "-" * 20)
         print(self.current_state)
         print("[steps to go]", len(dpoints))
+        print("[passed time]", len(self.visited_pts))
 
         if self.debug:
             self.plot_state()
@@ -217,15 +224,16 @@ class Pdm4arAgent(Agent):
             dvos.append(obs)
         return dvos
 
-    def is_path_in_collision(self, offset=3.0):
+    def is_path_in_collision(self, offset=3.0, replan_horizon=3):
         """
         Get True if the simplified path is in collision with the dynamic obstacles. (from the closest non-reach stop)
+        :param replan_horizon: check only closest splits of path to save computation time
         :param offset: for collision checks
         :return:
         """
         if self.planner is None:
             return False
-        for start, end in zip(self.stops[:-1], self.stops[1:]):
+        for start, end in zip(self.stops[:replan_horizon], self.stops[1:replan_horizon+1]):
             if self.planner.is_collision(start, end, offset):
                 return True
         return False
@@ -462,7 +470,7 @@ class Pdm4arAgent(Agent):
             axs.plot(*safe_s_obstacle.exterior.xy)
 
         # plot planned path
-        axs.plot([x[0] for x in self.planner.path], [x[1] for x in self.planner.path], '-k', linewidth=1)
+        axs.plot([[s.x, s.y] for s in self.stops], '-k', linewidth=1)
 
         # plot discretized path
         C0 = np.array([[c.x, c.y] for c in self.C0]).reshape(-1, 2)
@@ -520,24 +528,15 @@ class Pdm4arAgent(Agent):
         return (lb if x < lb else ub) if x < lb or x > ub else x
 
     @staticmethod
-    def is_between(a, b, c):
+    def is_between(a: Node, b: Node, c: Node):
         """
         ref: https://stackoverflow.com/questions/328107/how-can-you-determine-a-point-is-between-two-other-points-on
         -a-line-segment
         """
-        crossproduct = (c.y - a.y) * (b.x - a.x) - (c.x - a.x) * (b.y - a.y)
 
-        # compare versus epsilon for floating point values, or != 0 if using integers
-        if abs(crossproduct) > 1e-10:
-            return False
-
-        dotproduct = (c.x - a.x) * (b.x - a.x) + (c.y - a.y) * (b.y - a.y)
-        if dotproduct < 0:
-            return False
-
-        squaredlengthba = (b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y)
-        if dotproduct > squaredlengthba:
-            return False
-
-        return True
+        dot_product = (c.x - a.x) * (b.x - a.x) + (c.y - a.y) * (b.y - a.y)
+        ab, _ = a.point_to(b)
+        ac, _ = a.point_to(c)
+        angle = np.arccos(dot_product / (ab * ac))
+        return True if angle < 0.2 else False
 
