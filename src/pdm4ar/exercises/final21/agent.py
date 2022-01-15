@@ -163,7 +163,7 @@ class Pdm4arAgent(Agent):
             self.plot_state()
         return commands
 
-    def check_relative_angle(self, npc, thresh=np.pi/2):
+    def check_relative_angle(self, npc, thresh=2*np.pi/3):
         if npc is not None:
             dist, agent_aa = Node.from_state(self.current_state).point_to(self.stops[0])
             dvo_aa = np.arctan2(npc.state.vy, npc.state.vx) + npc.state.psi
@@ -245,7 +245,7 @@ class Pdm4arAgent(Agent):
             max_num_collision = self.config['algo']['max_num_collision']
             scale = 1 / (1.0 + self.dvo_num_collision[i] / max_num_collision)
             dx, dy = v * np.cos(aa) * scale, v * np.sin(aa) * scale
-            new_polygons = [affinity.translate(npc.occupancy.buffer(distance=8 * scale * s), xoff=dx * s, yoff=dy * s)
+            new_polygons = [affinity.translate(npc.occupancy.buffer(distance=5 * scale * s), xoff=dx * s, yoff=dy * s)
                             for s in np.linspace(0, 1, 10)]
             obs = unary_union(new_polygons)
             dvos.append(obs)
@@ -287,7 +287,7 @@ class Pdm4arAgent(Agent):
         self.waypoints = origin_waypoints
         return stops if end_point.equal(self.goal_pos) else None
 
-    def get_furthest_no_collision_waypoint(self, current_pos=None, offset=3.0, search_radius=30):
+    def get_furthest_no_collision_waypoint(self, current_pos=None, offset=3.0, search_radius=50):
         """
         Used for getting the simplified path.
         Get the furthest node/waypoint from the current node/waypoint without collision with the environment.
