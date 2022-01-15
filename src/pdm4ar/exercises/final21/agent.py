@@ -135,8 +135,7 @@ class Pdm4arAgent(Agent):
 
         self.t_step += 1
         dpoints = self.dpoints[self.t_step:]
-        if self.dpoints[self.t_step].equal(self.stops[0]) or \
-                self.is_between(self.stops[0], self.C0[0], self.dpoints[self.t_step]):
+        if self.reach_stop():
             self.last_stop = self.stops.pop(0)
             self.C0.pop(0)
 
@@ -160,6 +159,14 @@ class Pdm4arAgent(Agent):
         if self.debug:
             self.plot_state()
         return commands
+
+    def reach_stop(self):
+        if self.dpoints[self.t_step].equal(self.stops[0]):
+            return True
+        if self.is_between(self.stops[0], self.C0[0], self.dpoints[self.t_step]):
+            return True
+        dist, _ = self.stops[0].point_to(Node.from_state(self.current_state))
+        return True if dist < 5 else False
 
     def get_new_path(self, start_pos: Node, max_iter=2000):
         """
